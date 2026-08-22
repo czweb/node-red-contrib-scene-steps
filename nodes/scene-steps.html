@@ -266,24 +266,37 @@
       try { localStorage.setItem(EDITOR_SIZE_KEY, JSON.stringify({ width: w, height: h, ts: Date.now() })); } catch (e) {}
     }
     // 套用宽高：宽度写到 tray DOM，高度写到根容器（tray 本身满屏高度，仅根容器需手动设）
-    // topOffset 动态测算顶部可见 DOM 高度（名称栅格 + 高级选项折叠面板），不再写死 260
+    // topOffset 动态测算顶部可见 DOM 高度（名称行 + 高级选项折叠面板），不再写死 260
     function applyEditorSize(width, height) {
       try {
         var root = document.querySelector('#nr-scene-steps-root');
         var trayEl = root ? root.closest('.red-ui-tray') : null;
         if (trayEl && width > 0) { trayEl.style.width = width + 'px'; }
         if (root && height > 0) {
-          var topH = 220;
-          try {
-            var g = $('.nr-ss-top-grid').first();
-            var adv = $('#nr-ss-top-adv-body:visible').first();
-            var row = $('.nr-ss-top-row').first();
-            var rh = row.length ? (row.outerHeight(true) || 0) : 0;
-            var ah = adv.length ? (adv.outerHeight(true) || 0) : 0;
-            if (rh + ah > 0) topH = rh + ah + 60;
-          } catch (e2) {}
+          var topH = calcTopOffset();
           root.style.height = Math.max(360, height - topH) + 'px';
         }
+      } catch (e) {}
+    }
+    // 测算顶部可见 DOM 实际高度（名称行 + 折叠面板展开时的 body），收起时 body 不可见高度为 0
+    function calcTopOffset() {
+      var topH = 220;
+      try {
+        var adv = $('#nr-ss-top-adv-body:visible').first();
+        var row = $('.nr-ss-top-row').first();
+        var rh = row.length ? (row.outerHeight(true) || 0) : 0;
+        var ah = adv.length ? (adv.outerHeight(true) || 0) : 0;
+        if (rh + ah > 0) topH = rh + ah + 60;
+      } catch (e) { topH = 220; }
+      return topH;
+    }
+    // 展开/收起高级选项后重算三栏高度：tray 满屏，可用高度 = 视口 - 120（tray header/buttons 预留）
+    function recalcEditorHeight() {
+      try {
+        var root = document.querySelector('#nr-scene-steps-root');
+        if (!root) return;
+        var avail = window.innerHeight - 120;
+        root.style.height = Math.max(360, avail - calcTopOffset()) + 'px';
       } catch (e) {}
     }
 
@@ -921,7 +934,8 @@
         }
         $('#nr-ss-top-adv-toggle').off('click.topadv').on('click.topadv', function () {
           topAdvOpen = !topAdvOpen;
-          $('#nr-ss-top-adv-body').slideToggle(120);
+          // 展开动画结束后重算三栏高度：收起时三栏自动变高，展开时让出面板空间
+          $('#nr-ss-top-adv-body').slideToggle(120, recalcEditorHeight);
           $('.nr-ss-top-adv-arrow').text(topAdvOpen ? '▼' : '▶');
           $('#nr-ss-top-adv-toggle').toggleClass('expanded', topAdvOpen);
           $('#nr-ss-top-adv-body').toggleClass('expanded', topAdvOpen);
@@ -947,18 +961,8 @@
       oneditresize: function (size) {
         var box = document.querySelector('#nr-scene-steps-root');
         if (box && size && size.height) {
-          // 动态测算顶部可见 DOM 实际高度（名称栅格 + 高级选项折叠面板 header 或 body），
-          // 不再写死 260；折叠展开/收起均能正确撑满
-          var topH = 220;
-          try {
-            var g = $('.nr-ss-top-grid').first();
-            var adv = $('#nr-ss-top-adv-body:visible').first();
-            var row = $('.nr-ss-top-row').first();
-            var rh = row.length ? (row.outerHeight(true) || 0) : 0;
-            var ah = adv.length ? (adv.outerHeight(true) || 0) : 0;
-            if (rh + ah > 0) topH = rh + ah + 60;
-          } catch (e) { topH = 220; }
-          box.style.height = Math.max(360, size.height - topH) + 'px';
+          // 动态测算顶部可见 DOM 实际高度（名称行 + 折叠面板 body），不再写死 260
+          box.style.height = Math.max(360, size.height - calcTopOffset()) + 'px';
         }
         // 防抖 300ms 写入 localStorage（跳过初始展示期回调，避免覆盖记忆值）
         if (editorSizeReady && size && size.width) {
