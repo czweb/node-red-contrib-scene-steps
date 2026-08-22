@@ -1,0 +1,64 @@
+{
+  "name": "node-red-contrib-scene-steps",
+  "version": "0.1.0",
+  "description": "Sequential task-list scene runner for Node-RED. Manage ordered steps (delay/TCP/UDP/HTTP/MQTT/labels/jumps/subscenes/condition-wait) inside a single node with a drag-and-drop step-list editor. Say goodbye to spaghetti wiring.",
+  "keywords": [
+    "node-red",
+    "scene",
+    "sequencer",
+    "sequence",
+    "steps",
+    "task-list",
+    "automation",
+    "control",
+    "tcp",
+    "udp",
+    "http",
+    "mqtt",
+    "delay",
+    "condition-wait",
+    "subscene",
+    "jump",
+    "label"
+  ],
+  "license": "MIT",
+  "author": "Scene Steps Contributors",
+  "main": "nodes/scene-steps.js",
+  "node-red": {
+    "version": ">=3.1.0",
+    "nodes": {
+      "scene-steps": "nodes/scene-steps.js"
+    },
+    "resources": {
+      "editor.bundle.js": "editor-src/dist/scene-steps-editor.bundle.js"
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "node-red": ">=3.1.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "mocha": "^10.4.0",
+    "node-red": "^4.0.0",
+    "node-red-node-test-helper": "^0.3.4"
+  },
+  "optionalDependencies": {},
+  "scripts": {
+    "build:editor": "cd editor-src && npm run build",
+    "test": "mocha --recursive test/unit test/integration --timeout 15000 --exit"
+  },
+  "files": [
+    "nodes/",
+    "actions/",
+    "editor-src/dist/",
+    "examples/",
+    "icons/",
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}

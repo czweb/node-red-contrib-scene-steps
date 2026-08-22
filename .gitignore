@@ -1,0 +1,15 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+.vscode/
+.idea/
+*.tgz
+*.tar.gz
+coverage/
+.trae/
+
+# editor-src 独立前端构建：依赖 + 临时产物（dist 保留因为要 npm publish 时附带）
+editor-src/node_modules/
+editor-src/dist/*.map
+test/e2e_screenshots/*.png
+test/e2e_screenshots/*.jpg

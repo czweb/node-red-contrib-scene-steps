@@ -1,0 +1,102 @@
+[
+  {
+    "id": "scene-subscene-demo",
+    "type": "tab",
+    "label": "示例4: 子场景复用 (会议室启动 call_scene + TCP/http_request)",
+    "disabled": false,
+    "info": "演示 call_scene 内嵌子场景复用。实际业务可把『某台设备上电』做成一段内嵌 steps，\n多个会议场景可通过 steps_from_var 注入复用。"
+  },
+  {
+    "id": "inj-4", "type": "inject", "z": "scene-subscene-demo", "name": "一键会议模式",
+    "repeat":"","crontab":"","once":false,"onceDelay":0.1,
+    "topic":"","payload":"","payloadType":"date",
+    "x":120,"y":140,"wires":[["sc-4"]]
+  },
+  {
+    "id": "sc-4",
+    "type": "scene-steps",
+    "z": "scene-subscene-demo",
+    "name": "Meeting-Start",
+    "failBehavior": "stop",
+    "maxLoopLimit": 1000,
+    "defaultStepTimeoutMs": 10000,
+    "steps": [
+      {
+        "id": "a", "type": "call_scene", "label": "子场景: 打开录播主机",
+        "config": {
+          "mode": "inline_steps",
+          "inline_steps": [
+            { "type": "tcp_send", "label": "录播电源",
+              "config": { "host":"172.16.5.10","port":8080,"payload":"PWR ON\\r\\n","format":"string","expectResponse":false,"keepAlive":false,"connectTimeoutMs":3000 },
+              "postDelayMs": 1500, "timeoutMs": 0, "failBehaviorOverride": "skip" },
+            { "type": "http_request", "label": "切本地输入",
+              "config": {
+                "url": "http://172.16.5.10/api/switch",
+                "method": "POST",
+                "headers": { "Content-Type": "application/json" },
+                "body": "{\"source\":\"hdmi1\",\"layout\":\"1080p\"}",
+                "bodyJson": true, "bodyEncode": "utf8",
+                "timeoutMs": 4000,
+                "followRedirect": false, "redirectLimit": 3,
+                "responseParse": "json"
+              }
+            }
+          ],
+          "stepsVar": "",
+          "inheritVars": true,
+          "injectVars": { "room": "boardroom" }
+        }
+      },
+      {
+        "id": "b", "type": "tcp_send", "label": "摄像机转预设位2",
+        "config": {
+          "host":"172.16.5.12","port":5678,
+          "payload":"\\x81\\x01\\x06\\x02\\x00\\x00\\x00\\x00\\x02\\xFF",
+          "format":"hex",
+          "expectResponse":false,
+          "keepAlive":false,
+          "connectTimeoutMs":3000
+        },
+        "postDelayMs": 2000
+      },
+      {
+        "id": "c", "type": "call_scene", "label": "子场景: 灯光+幕布",
+        "config": {
+          "mode": "inline_steps",
+          "inline_steps": [
+            { "type": "tcp_send", "label": "会议模式灯效",
+              "config": { "host":"172.16.5.20","port":9000,"payload":"SET SCENE MEET\\r\\n","format":"string","expectResponse":false,"keepAlive":false,"connectTimeoutMs":2000 },
+              "postDelayMs": 500, "failBehaviorOverride": "skip" },
+            { "type": "tcp_send", "label": "电动幕布下降",
+              "config": { "host":"172.16.5.30","port":8023,"payload":"SCREEN DOWN\\r\\n","format":"string","expectResponse":false,"keepAlive":false,"connectTimeoutMs":2000 },
+              "postDelayMs": 8000 }
+          ],
+          "stepsVar": "", "inheritVars": true, "injectVars": {}
+        }
+      },
+      {
+        "id": "d", "type": "http_request", "label": "OA 会议室占用",
+        "config": {
+          "url": "http://oa.corp.local/api/rooms/boardroom/occupy",
+          "method": "PUT",
+          "headers": { "X-Token": "{{ env.OA_TOKEN || 'dev' }}" },
+          "body": "",
+          "bodyJson": false,
+          "bodyEncode": "utf8",
+          "timeoutMs": 5000,
+          "followRedirect": false,
+          "redirectLimit": 3,
+          "responseParse": "utf8"
+        },
+        "failBehaviorOverride": "skip",
+        "postDelayMs": 0
+      }
+    ],
+    "x": 360, "y": 140,
+    "wires": [["st4"],["dn4"],["er4"],["au4"]]
+  },
+  { "id":"st4","type":"debug","z":"scene-subscene-demo","name":"Step","active":true,"tosidebar":true,"complete":"true","targetType":"full","x":640,"y":80,"wires":[] },
+  { "id":"dn4","type":"debug","z":"scene-subscene-demo","name":"Done","active":true,"tosidebar":true,"complete":"true","targetType":"full","x":640,"y":140,"wires":[] },
+  { "id":"er4","type":"debug","z":"scene-subscene-demo","name":"Error","active":true,"tosidebar":true,"console":true,"complete":"true","targetType":"full","x":640,"y":200,"wires":[] },
+  { "id":"au4","type":"debug","z":"scene-subscene-demo","name":"Audit","active":true,"tosidebar":false,"complete":"true","targetType":"full","x":640,"y":260,"wires":[] }
+]

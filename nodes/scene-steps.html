@@ -1,0 +1,712 @@
+<!--
+  node-red-contrib-scene-steps — nodes/scene-steps.html
+  Node-RED 自定义节点 "scene-steps" 编辑器模板。
+
+  三栏布局（Vue3 零构建，oneditprepare 中动态从 CDN 拉 vue.global.prod.js）：
+    左栏：动作分类 + 列表（按 category 分组）
+    中栏：步骤列表 + 拖拽排序（HTML5 drag/drop 原生）+ 增删改 + 导入/导出 JSON
+    右栏：JSON Schema 表单（按 action.configSchema 渲染 string/number/enum/boolean/object/textarea）
+  离线兜底：CDN 加载失败时退化为 textarea 直接编辑 JSON
+--->
+
+<script type="text/x-red" data-template-name="scene-steps">
+  <!-- Node-RED 默认属性（name / failBehavior / maxLoopLimit / defaultStepTimeoutMs） -->
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> 名称</label>
+    <input type="text" id="node-input-name" placeholder="scene-steps">
+  </div>
+  <div class="form-row">
+    <label for="node-input-failBehavior"><i class="fa fa-exclamation-triangle"></i> 失败策略</label>
+    <select id="node-input-failBehavior">
+      <option value="stop">stop: 中止执行（报错）</option>
+      <option value="skip">skip: 跳过当前步</option>
+      <option value="retry">retry: 重试 1 次</option>
+      <option value="retry:3">retry:3: 重试 3 次</option>
+      <option value="retry:5">retry:5: 重试 5 次</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-defaultStepTimeoutMs"><i class="fa fa-clock-o"></i> 默认步骤超时</label>
+    <input type="number" id="node-input-defaultStepTimeoutMs" min="50" step="50" style="width: calc(100% - 150px)"> ms
+  </div>
+  <div class="form-row">
+    <label for="node-input-maxLoopLimit"><i class="fa fa-repeat"></i> 跳转循环上限</label>
+    <input type="number" id="node-input-maxLoopLimit" min="1" step="1" style="width: calc(100% - 150px)">
+  </div>
+
+  <!-- 隐藏字段：保存 steps JSON -->
+  <input type="hidden" id="node-input-steps">
+
+  <!-- 三栏编辑器容器 -->
+  <div id="nr-scene-steps-root" style="width:100%;height:520px;margin:4px 0 0 0;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fff;">
+    <div id="nr-scene-steps-vue-mount" style="height:100%;"></div>
+  </div>
+
+  <style>
+    #nr-scene-steps-root * { box-sizing:border-box; font-size:12px; }
+    #nr-scene-steps-root { --border:#d9d9d9; --primary:#1677ff; --danger:#ff4d4f; --warn:#faad14; --bg:#fafafa; }
+    .nr-ss-app { display:grid; grid-template-columns: 200px 1fr 320px; height:100%; }
+    .nr-ss-pane { overflow:hidden; display:flex; flex-direction:column; border-right:1px solid var(--border); }
+    .nr-ss-pane:last-child { border-right:none; }
+    .nr-ss-pane-header { padding:6px 10px; font-weight:600; background:#f5f7fa; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    .nr-ss-pane-body { flex:1; overflow:auto; padding:6px; }
+    .nr-ss-cat { margin-bottom:6px; }
+    .nr-ss-cat-title { font-weight:600; color:#555; padding:2px 4px; border-bottom:1px dashed #eee; margin-bottom:4px; }
+    .nr-ss-action-item { display:flex; align-items:center; gap:6px; padding:5px 6px; border-radius:4px; cursor:grab; user-select:none; border:1px solid transparent; }
+    .nr-ss-action-item:hover { background:#e6f4ff; border-color:#91caff; }
+    .nr-ss-action-icon { color:#888; width:16px; text-align:center; }
+    .nr-ss-action-type { color:#222; flex:1; }
+    .nr-ss-action-add-btn { color:var(--primary); border:1px solid var(--primary); border-radius:3px; padding:0 4px; font-size:11px; background:#fff; cursor:pointer; }
+    .nr-ss-step { border:1px solid var(--border); background:#fff; border-radius:5px; margin-bottom:5px; padding:6px 8px; cursor:pointer; display:flex; align-items:center; gap:6px; position:relative; }
+    .nr-ss-step.selected { outline:2px solid var(--primary); outline-offset:-1px; }
+    .nr-ss-step.dragging { opacity:0.5; }
+    .nr-ss-step.drop-before { border-top:3px solid var(--primary); }
+    .nr-ss-step.drop-after { border-bottom:3px solid var(--primary); }
+    .nr-ss-step-order { width:22px; height:22px; border-radius:50%; background:#e6f4ff; color:var(--primary); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .nr-ss-step-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .nr-ss-step-title small { color:#999; font-size:11px; margin-left:6px; }
+    .nr-ss-step-label { color:#1677ff; font-size:11px; padding:0 4px; border:1px dashed #91caff; border-radius:3px; margin-right:4px; }
+    .nr-ss-step-remove { color:var(--danger); border:none; background:transparent; cursor:pointer; font-size:14px; padding:2px 6px; }
+    .nr-ss-step-drag { color:#bbb; cursor:grab; padding:0 4px; }
+    .nr-ss-step-placeholder { text-align:center; color:#aaa; padding:40px 0; }
+    .nr-ss-add-row { text-align:center; padding:6px; }
+    .nr-ss-add-row button { border:1px dashed #bbb; background:#fafafa; color:#555; padding:4px 12px; border-radius:4px; cursor:pointer; }
+    .nr-ss-add-row button:hover { border-color:var(--primary); color:var(--primary); background:#e6f4ff; }
+    .nr-ss-sf-row { display:grid; grid-template-columns: 84px 1fr; align-items:center; gap:4px; padding:3px 2px; border-bottom:1px solid #f0f0f0; }
+    .nr-ss-sf-row label { color:#444; padding-right:4px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+    .nr-ss-sf-row .nr-ss-sf-hint { grid-column:2; color:#999; font-size:10px; margin-bottom:4px; }
+    .nr-ss-sf-input, .nr-ss-sf-textarea, .nr-ss-sf-select { width:100%; padding:3px 6px; border:1px solid #d9d9d9; border-radius:3px; background:#fff; font-size:12px; }
+    .nr-ss-sf-textarea { min-height:60px; font-family:Consolas,Menlo,monospace; resize:vertical; }
+    .nr-ss-sf-input:focus, .nr-ss-sf-textarea:focus, .nr-ss-sf-select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 1px rgba(22,119,255,.15); }
+    .nr-ss-sf-check { display:flex; align-items:center; gap:6px; }
+    .nr-ss-section-title { font-weight:600; color:#555; padding:6px 2px 3px 2px; border-bottom:1px solid #eee; margin-bottom:4px; }
+    .nr-ss-badge { display:inline-block; padding:1px 6px; background:#f0f5ff; color:#1677ff; border-radius:10px; font-size:11px; border:1px solid #cfe0ff; margin-right:4px; }
+    .nr-ss-subtle { color:#999; font-size:11px; padding:6px 2px; }
+    .nr-ss-msg { padding:6px 8px; border-radius:4px; margin:4px 0; }
+    .nr-ss-msg.err { background:#fff2f0; color:#ff4d4f; border:1px solid #ffccc7; }
+    .nr-ss-msg.ok { background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+    .nr-ss-tbar { display:flex; gap:6px; align-items:center; padding:0 2px 4px 2px; border-bottom:1px solid #f0f0f0; margin-bottom:4px; }
+    .nr-ss-tbar button { padding:3px 8px; border:1px solid #d9d9d9; background:#fff; border-radius:3px; cursor:pointer; font-size:11px; }
+    .nr-ss-tbar button:hover { border-color:var(--primary); color:var(--primary); }
+    .nr-ss-tbar button.danger:hover { border-color:var(--danger); color:var(--danger); }
+  </style>
+</script>
+
+<script type="text/x-red" data-help-name="scene-steps">
+  <p><b>scene-steps</b>：按先后顺序执行「场景步骤」。适合把"大量延时 + TCP/UDP/HTTP/MQTT 指令串"的中控类工作流收敛在一个节点内编排，不再需要大量"延时节点 + 杂乱连线"。</p>
+  <h3>输入 (msg.payload)</h3>
+  <ul>
+    <li><code>"run"</code> / 省略：执行节点上配置的 steps。</li>
+    <li><code>"stop"</code>：取消当前运行中的场景。</li>
+    <li><code>"pause"</code> / <code>"resume"</code>：暂停 / 继续。</li>
+    <li><code>"debug"</code>：Step 口推送 steps 配置 + 运行状态。</li>
+    <li><code>Array</code>：直接作为动态 steps 运行（不使用节点配置）。</li>
+  </ul>
+  <h3>输出 (4 口)</h3>
+  <ol>
+    <li><b>step</b>：每一步执行结果（ok/error 都会推）。</li>
+    <li><b>done</b>：正常结束或 stop(emitAsDone=true) 的汇总结果。</li>
+    <li><b>error</b>：不可恢复错误 (failBehavior=stop 或超时或递归/嵌套超限)。</li>
+    <li><b>audit</b>：启停、暂停、取消等审计事件，便于落盘。</li>
+  </ol>
+  <h3>模板插值</h3>
+  <p>所有 string 类参数支持 <code>{{vars.x}}</code>、<code>{{outputs[-1].foo}}</code>、<code>{{env.HOME}}</code>；表达式支持三元、比较、数学运算；显式禁用 eval / Function / process / require 以提升安全性。</p>
+  <h3>10 个内置动作</h3>
+  <ul>
+    <li>流控：delay / label / jump / stop / call_scene / condition_wait</li>
+    <li>网络：tcp_send / udp_send / http_request / mqtt_publish（QoS0 only）</li>
+  </ul>
+</script>
+
+<script type="text/javascript">
+  (function () {
+    'use strict';
+
+    // ============================
+    //  离线 fallback: 最小 action meta
+    // ============================
+    var DEFAULT_META = {
+      ok: true, version: '0.1.0',
+      categories: ['flow', 'network', 'timing'],
+      actions: [
+        { type: 'delay',            category: 'timing',  icon: 'fa-hourglass-half', label: '延时',
+          configSchema: { delayMs: { type: 'number', min: 0, default: 500, label: '延时(ms)' } },
+          defaults: { delayMs: 500 } },
+        { type: 'stop',             category: 'flow',    icon: 'fa-stop-circle',   label: '停止',
+          configSchema: { emitAsDone: { type: 'boolean', default: true, label: '走 Done 口' }, reason: { type: 'string', default: '', label: '原因' } },
+          defaults: { emitAsDone: true, reason: '' } },
+        { type: 'label',            category: 'flow',    icon: 'fa-flag',          label: '标签',
+          configSchema: { name: { type: 'string', default: '', label: '标签名（A-Za-z_ 开头，0-63 字符）', required: true } },
+          defaults: { name: '' } },
+        { type: 'jump',             category: 'flow',    icon: 'fa-share',         label: '跳转',
+          configSchema: { target: { type: 'string', default: '', label: '目标标签名', required: true }, max: { type: 'number', min: 1, default: 10, label: '最大跳转次数' }, whenExpr: { type: 'string', default: '', label: '条件表达式(可选)', format: 'textarea' } },
+          defaults: { target: '', max: 10, whenExpr: '' } },
+        { type: 'call_scene',       category: 'flow',    icon: 'fa-film',          label: '子场景',
+          configSchema: { mode: { type: 'string', enum: ['inline_steps','steps_from_var'], default: 'inline_steps', label: '模式' }, inline_steps: { type: 'object', default: [], label: '内嵌步骤数组(JSON)' }, stepsVar: { type: 'string', default: '', label: '变量名(mode=steps_from_var)' }, inheritVars: { type: 'boolean', default: true, label: '继承变量' }, injectVars: { type: 'object', default: {}, label: '注入变量(JSON)' } },
+          defaults: { mode: 'inline_steps', inline_steps: [], stepsVar: '', inheritVars: true, injectVars: {} } },
+        { type: 'condition_wait',   category: 'flow',    icon: 'fa-clock-o',       label: '等待条件',
+          configSchema: { expression: { type: 'string', default: '', label: '表达式', format: 'textarea', required: true }, intervalMs: { type: 'number', min: 1, default: 200, label: '轮询间隔(ms)' }, maxMs: { type: 'number', min: 1, default: 30000, label: '最长等待(ms)' } },
+          defaults: { expression: '', intervalMs: 200, maxMs: 30000 } },
+        { type: 'tcp_send',         category: 'network', icon: 'fa-plug',          label: 'TCP',
+          configSchema: { host:{type:'string',default:'',label:'主机',required:true}, port:{type:'number',default:0,label:'端口',required:true}, payload:{type:'string',default:'',label:'数据',format:'textarea'}, format:{type:'string',enum:['auto','string','hex','base64'],default:'auto',label:'输入格式'}, responseFormat:{type:'string',enum:['string','hex','base64'],default:'string',label:'响应格式'}, expectResponse:{type:'boolean',default:false,label:'等待响应'}, readLen:{type:'number',default:0,label:'读字节数(0=分隔符)'}, readDelimiter:{type:'string',default:'',label:'分隔符(字符串或HEX)'}, readTimeoutMs:{type:'number',default:5000,label:'读超时(ms)'}, keepAlive:{type:'boolean',default:true,label:'保持连接'}, connectTimeoutMs:{type:'number',default:10000,label:'连接超时(ms)'} },
+          defaults: { host:'', port:0, payload:'', format:'auto', responseFormat:'string', expectResponse:false, readLen:0, readDelimiter:'', readTimeoutMs:5000, keepAlive:true, connectTimeoutMs:10000 } },
+        { type: 'udp_send',         category: 'network', icon: 'fa-paper-plane',   label: 'UDP',
+          configSchema: { host:{type:'string',default:'',label:'主机',required:true}, port:{type:'number',default:0,label:'端口',required:true}, payload:{type:'string',default:'',label:'数据',format:'textarea'}, format:{type:'string',enum:['auto','string','hex','base64'],default:'auto',label:'输入格式'}, bindLocalAddr:{type:'string',default:'',label:'绑定本地IP'}, bindLocalPort:{type:'number',default:0,label:'绑定本地端口'}, broadcast:{type:'boolean',default:false,label:'SO_BROADCAST'}, waitAck:{type:'boolean',default:false,label:'等待回包'}, ackTimeoutMs:{type:'number',default:2000,label:'ack超时(ms)'} },
+          defaults: { host:'', port:0, payload:'', format:'auto', bindLocalAddr:'', bindLocalPort:0, broadcast:false, waitAck:false, ackTimeoutMs:2000 } },
+        { type: 'http_request',     category: 'network', icon: 'fa-globe',         label: 'HTTP',
+          configSchema: { url:{type:'string',default:'',label:'URL',required:true}, method:{type:'string',enum:['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'],default:'GET',label:'方法'}, headers:{type:'object',default:{},label:'请求头(JSON)'}, body:{type:'string',default:'',label:'请求体',format:'textarea'}, bodyJson:{type:'boolean',default:false,label:'请求体JSON化'}, bodyEncode:{type:'string',enum:['utf8','hex','base64'],default:'utf8',label:'请求体编码'}, timeoutMs:{type:'number',default:15000,label:'超时(ms)'}, followRedirect:{type:'boolean',default:false,label:'跟随重定向'}, redirectLimit:{type:'number',default:5,label:'重定向上限'}, responseParse:{type:'string',enum:['utf8','json','hex','base64','buffer'],default:'utf8',label:'响应解析'} },
+          defaults: { url:'', method:'GET', headers:{}, body:'', bodyJson:false, bodyEncode:'utf8', timeoutMs:15000, followRedirect:false, redirectLimit:5, responseParse:'utf8' } },
+        { type: 'mqtt_publish',     category: 'network', icon: 'fa-rss',           label: 'MQTT',
+          configSchema: { host:{type:'string',default:'',label:'Broker Host',required:true}, port:{type:'number',default:1883,label:'端口',required:true}, clientId:{type:'string',default:'',label:'clientId'}, username:{type:'string',default:'',label:'用户名'}, password:{type:'string',default:'',label:'密码'}, topic:{type:'string',default:'',label:'主题',required:true}, payload:{type:'string',default:'',label:'消息体',format:'textarea'}, format:{type:'string',enum:['auto','string','hex','base64'],default:'auto',label:'消息体格式'}, connectTimeoutMs:{type:'number',default:10000,label:'连接超时(ms)'}, responseTimeoutMs:{type:'number',default:5000,label:'收发等待(ms)'} },
+          defaults: { host:'', port:1883, clientId:'', username:'', password:'', topic:'', payload:'', format:'auto', connectTimeoutMs:10000, responseTimeoutMs:5000 } }
+      ]
+    };
+
+    // ============================
+    //  Helpers
+    // ============================
+    function fetchMeta(cb) {
+      try {
+        var base = (RED.settings.httpNodeRoot || '');
+        if (base && base.charAt(base.length - 1) !== '/') base += '/';
+        var url = base + 'scene-steps/actions-meta';
+        $.getJSON(url).done(function (data) { cb(null, data && data.ok ? data : null); })
+          .fail(function () { cb(null, JSON.parse(JSON.stringify(DEFAULT_META))); });
+      } catch (e) { cb(null, JSON.parse(JSON.stringify(DEFAULT_META))); }
+    }
+    function ensureJSON(v) {
+      if (Array.isArray(v)) return v;
+      if (!v) return [];
+      if (typeof v === 'string') {
+        try { var p = JSON.parse(v); if (Array.isArray(p)) return p; } catch (e) {}
+      }
+      return [];
+    }
+    function ensureVueCDN(cb) {
+      if (window.Vue) return cb(null, window.Vue);
+      if (document.getElementById('nr-ss-vue-loader')) return setTimeout(function () { ensureVueCDN(cb); }, 150);
+      var s = document.createElement('script');
+      s.id = 'nr-ss-vue-loader';
+      s.src = 'https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js';
+      s.integrity = 'sha384-placeholder'; // integrity 去掉，防止 unpkg CDN 动态文件不一致
+      s.removeAttribute('integrity');
+      s.onload = function () { cb(null, window.Vue); };
+      s.onerror = function () { cb(new Error('Vue3 CDN 加载失败（可能离线）'), null); };
+      document.head.appendChild(s);
+    }
+
+    // ============================
+    //  Vue App (三栏编辑器)
+    // ============================
+    function mountVueEditor(Vue, mountEl, meta, initialSteps, onChange) {
+      var createApp = Vue.createApp, reactive = Vue.reactive, computed = Vue.computed, h = Vue.h;
+      var app = createApp({
+        setup: function () {
+          var state = reactive({
+            meta: meta,
+            steps: Array.isArray(initialSteps) && initialSteps.length ? JSON.parse(JSON.stringify(initialSteps)) : [],
+            selectedIndex: -1,
+            dragIndex: -1,
+            dragOverIndex: -1,
+            dragOverPos: null,
+            status: { type: '', text: '' }
+          });
+          var actionsByType = computed(function () {
+            var m = new Map();
+            (state.meta.actions || []).forEach(function (a) { m.set(a.type, a); });
+            return m;
+          });
+          var groups = computed(function () {
+            var gs = new Map();
+            (state.meta.actions || []).forEach(function (a) {
+              var c = a.category || 'other';
+              if (!gs.has(c)) gs.set(c, []);
+              gs.get(c).push(a);
+            });
+            return Array.from(gs.entries()).map(function (kv) { return { category: kv[0], list: kv[1] }; });
+          });
+          function deepClone(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return o; } }
+          function genId() { return 'st_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
+          function setStatus(t, msg) {
+            state.status = { type: t, text: msg };
+            if (msg) setTimeout(function () { if (state.status.text === msg) state.status = { type: '', text: '' }; }, 2500);
+          }
+          function persist() { if (typeof onChange === 'function') onChange(deepClone(state.steps)); }
+          function addAction(type, atIndex) {
+            var action = actionsByType.value.get(type);
+            if (!action) return;
+            var step = {
+              id: genId(), type: type, label: '',
+              config: deepClone(action.defaults || {}),
+              postDelayMs: 0, timeoutMs: 0, failBehaviorOverride: '',
+              retry: 3, retryIntervalMs: 500
+            };
+            if (type === 'label') step.label = 'label_' + (state.steps.length + 1);
+            if (typeof atIndex === 'number' && atIndex >= 0 && atIndex < state.steps.length) state.steps.splice(atIndex + 1, 0, step);
+            else state.steps.push(step);
+            state.selectedIndex = state.steps.indexOf(step);
+            setStatus('ok', '已添加 ' + (action.label || type));
+            persist();
+          }
+          function removeStep(idx) {
+            if (idx < 0 || idx >= state.steps.length) return;
+            state.steps.splice(idx, 1);
+            if (state.selectedIndex >= state.steps.length) state.selectedIndex = state.steps.length - 1;
+            setStatus('ok', '已删除 1 步');
+            persist();
+          }
+          function duplicateStep(idx) {
+            if (idx < 0 || idx >= state.steps.length) return;
+            var copy = deepClone(state.steps[idx]);
+            copy.id = genId();
+            state.steps.splice(idx, 0, copy);
+            persist();
+          }
+          function moveStep(from, to) {
+            if (from === to || from < 0 || to < 0) return;
+            if (from >= state.steps.length || to >= state.steps.length) return;
+            var item = state.steps.splice(from, 1)[0];
+            state.steps.splice(to, 0, item);
+            state.selectedIndex = to;
+            persist();
+          }
+          function clearSteps() {
+            if (!confirm('确定清空全部 ' + state.steps.length + ' 步？')) return;
+            state.steps = []; state.selectedIndex = -1; persist();
+          }
+          function onDragStartStep(e, idx) {
+            state.dragIndex = idx;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', 'step:' + idx);
+            try { e.target.classList.add('dragging'); } catch (err) {}
+          }
+          function onDragEndStep() {
+            state.dragIndex = -1; state.dragOverIndex = -1; state.dragOverPos = null;
+            var els = document.querySelectorAll('#nr-scene-steps-root .nr-ss-step');
+            for (var i = 0; i < els.length; i++) els[i].classList.remove('dragging','drop-before','drop-after');
+          }
+          function onDragOverStep(e, idx) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            var rect = e.currentTarget.getBoundingClientRect();
+            var before = (e.clientY - rect.top) < (rect.height / 2);
+            state.dragOverIndex = idx;
+            state.dragOverPos = before ? 'before' : 'after';
+            var els = document.querySelectorAll('#nr-scene-steps-root .nr-ss-step.drop-before,#nr-scene-steps-root .nr-ss-step.drop-after');
+            for (var i = 0; i < els.length; i++) els[i].classList.remove('drop-before','drop-after');
+            e.currentTarget.classList.add(before ? 'drop-before' : 'drop-after');
+          }
+          function onDropStep(e, idx) {
+            e.preventDefault();
+            var data = (e.dataTransfer.getData && e.dataTransfer.getData('text/plain')) || '';
+            if (data.indexOf('action:') === 0) {
+              addAction(data.slice(7), state.dragOverPos === 'before' ? idx - 1 : idx);
+            } else if (data.indexOf('step:') === 0) {
+              var from = Number(data.slice(5));
+              var to = state.dragOverPos === 'before' ? idx : idx + 1;
+              var target = (from < to) ? to - 1 : to;
+              moveStep(from, target);
+            }
+            onDragEndStep();
+          }
+          function onDragStartAction(e, type) {
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('text/plain', 'action:' + type);
+          }
+          function stepMeta(idx) {
+            var s = state.steps[idx];
+            return s ? (actionsByType.value.get(s.type) || null) : null;
+          }
+          function onConfigChange(idx, key, value) {
+            var s = state.steps[idx]; if (!s) return;
+            s.config = s.config || {}; s.config[key] = value;
+            persist();
+          }
+          function onBaseChange(idx, key, value) {
+            var s = state.steps[idx]; if (!s) return;
+            s[key] = value; persist();
+          }
+          function exportJSON() {
+            var text = JSON.stringify(state.steps, null, 2);
+            try {
+              var blob = new Blob([text], { type: 'application/json' });
+              var url = URL.createObjectURL(blob);
+              var a = document.createElement('a'); a.href = url; a.download = 'scene-steps.json'; a.click();
+              setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 2000);
+            } catch (e) { setStatus('err', '浏览器不支持导出: ' + e.message); }
+          }
+          function importJSON(file) {
+            var r = new FileReader();
+            r.onload = function () {
+              try {
+                var arr = JSON.parse(r.result);
+                if (!Array.isArray(arr)) throw new Error('not array');
+                state.steps = arr.map(function (x) { return Object.assign({ id: genId(), config: {}, postDelayMs: 0, timeoutMs: 0 }, x); });
+                state.selectedIndex = state.steps.length ? 0 : -1;
+                setStatus('ok', '已导入 ' + state.steps.length + ' 步');
+                persist();
+              } catch (e) { setStatus('err', '导入失败: ' + e.message); }
+            };
+            r.readAsText(file);
+          }
+          function summarizeStep(s) {
+            if (!s || !s.config) return '';
+            var c = s.config; var short = [];
+            var keys = Object.keys(c).slice(0, 3);
+            for (var i = 0; i < keys.length; i++) {
+              var k = keys[i]; var v = c[k];
+              if (v == null || v === '') continue;
+              if (typeof v === 'object') { try { v = JSON.stringify(v).slice(0, 40); } catch (e) { v = '[object]'; } }
+              else if (typeof v === 'string' && v.length > 40) v = v.slice(0, 40) + '…';
+              short.push(k + '=' + String(v));
+            }
+            return short.join(' · ');
+          }
+          function renderField(idx, key, schema, value) {
+            var type = schema.type || 'string';
+            var label = schema.label || key;
+            var hint = schema.hint || '';
+            var required = !!schema.required;
+            var reqStar = required ? ' *' : '';
+            var control;
+            if (schema.enum && Array.isArray(schema.enum)) {
+              control = h('select', {
+                class: 'nr-ss-sf-select',
+                value: value != null ? value : (schema.default != null ? schema.default : ''),
+                onChange: function (e) { onConfigChange(idx, key, e.target.value); }
+              }, schema.enum.map(function (opt) { return h('option', { key: String(opt), value: opt }, String(opt)); }));
+            } else if (type === 'boolean') {
+              control = h('label', { class: 'nr-ss-sf-check' }, [
+                h('input', {
+                  type: 'checkbox', checked: !!value,
+                  onChange: function (e) { onConfigChange(idx, key, e.target.checked); }
+                }),
+                h('span', '启用')
+              ]);
+            } else if (type === 'object') {
+              var placeholder = schema.template ? '支持 {{vars.x}} 插值 / JSON' : 'JSON（键: 值）';
+              control = h('textarea', {
+                class: 'nr-ss-sf-textarea', rows: 3, placeholder: placeholder,
+                value: (typeof value === 'object') ? JSON.stringify(value || {}, null, 2) : (value || ''),
+                onChange: function (e) {
+                  var v = e.target.value;
+                  try {
+                    if (!v.trim()) v = {};
+                    else if (v.charAt(0) === '{') v = JSON.parse(v);
+                    onConfigChange(idx, key, v); setStatus('ok', '已解析 JSON');
+                  } catch (err) { onConfigChange(idx, key, v); }
+                }
+              });
+            } else if (type === 'number') {
+              control = h('input', {
+                type: 'number',
+                class: 'nr-ss-sf-input',
+                min: schema.min != null ? schema.min : undefined,
+                max: schema.max != null ? schema.max : undefined,
+                step: schema.format === 'textarea' ? undefined : 1,
+                value: value != null ? value : (schema.default != null ? schema.default : ''),
+                onChange: function (e) { onConfigChange(idx, key, Number(e.target.value)); }
+              });
+            } else if (schema.format === 'textarea') {
+              control = h('textarea', {
+                class: 'nr-ss-sf-textarea', rows: 4,
+                placeholder: schema.template ? '支持 {{vars.x}} / {{outputs[-1].f}} 插值' : '',
+                value: value != null ? value : (schema.default != null ? schema.default : ''),
+                onChange: function (e) { onConfigChange(idx, key, e.target.value); }
+              });
+            } else {
+              control = h('input', {
+                type: 'text',
+                class: 'nr-ss-sf-input',
+                placeholder: schema.template ? '支持 {{vars.x}} 插值' : '',
+                value: value != null ? value : (schema.default != null ? schema.default : ''),
+                onChange: function (e) { onConfigChange(idx, key, e.target.value); }
+              });
+            }
+            return h('div', { key: 'f_' + key, class: 'nr-ss-sf-row' }, [
+              h('label', { attrs: { title: key } }, label + reqStar),
+              control,
+              hint ? h('div', { class: 'nr-ss-sf-hint' }, hint) : null
+            ]);
+          }
+          function renderForm() {
+            var idx = state.selectedIndex;
+            if (idx < 0) return h('div', { class: 'nr-ss-subtle' }, '请先在中间步骤列表里选择要编辑的步骤。\n\n💡 您可以：\n  1) 从左栏动作库拖动项到中间；\n  2) 双击动作库条目；\n  3) 点击动作库右侧「+」。');
+            var s = state.steps[idx];
+            var meta_ = stepMeta(idx);
+            if (!meta_) return h('div', { class: 'nr-ss-subtle' }, '未找到 action 定义: ' + s.type);
+            var rows = [];
+            rows.push(h('div', { class: 'nr-ss-section-title' }, [
+              h('span', { class: 'nr-ss-badge' }, meta_.label || s.type),
+              h('small', { style: 'color:#999' }, ' step #' + (idx + 1) + ' · id=' + String(s.id || '?').slice(0, 8))
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '步骤名'),
+              h('input', {
+                class: 'nr-ss-sf-input',
+                value: s.label || '', placeholder: '可选：跳转标签名 / 备注',
+                onChange: function (e) { onBaseChange(idx, 'label', e.target.value); }
+              })
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '步骤超时(ms)'),
+              h('input', {
+                type: 'number', min: 0, step: 50,
+                class: 'nr-ss-sf-input',
+                value: Number(s.timeoutMs) || 0,
+                placeholder: '0 = 使用节点默认',
+                onChange: function (e) { onBaseChange(idx, 'timeoutMs', Number(e.target.value)); }
+              })
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '完成后延时(ms)'),
+              h('input', {
+                type: 'number', min: 0, step: 50,
+                class: 'nr-ss-sf-input',
+                value: Number(s.postDelayMs) || 0,
+                placeholder: '下一步前等待(ms)',
+                onChange: function (e) { onBaseChange(idx, 'postDelayMs', Number(e.target.value)); }
+              })
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '失败策略'),
+              h('select', {
+                class: 'nr-ss-sf-select',
+                value: s.failBehaviorOverride || '',
+                onChange: function (e) { onBaseChange(idx, 'failBehaviorOverride', e.target.value); }
+              }, [
+                h('option', { value: '' }, '（继承节点级）'),
+                h('option', { value: 'stop' }, 'stop 中止'),
+                h('option', { value: 'skip' }, 'skip 跳过'),
+                h('option', { value: 'retry' }, 'retry 1 次'),
+                h('option', { value: 'retry:3' }, 'retry 3 次'),
+                h('option', { value: 'retry:5' }, 'retry 5 次')
+              ])
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '重试次数上限'),
+              h('input', {
+                type: 'number', min: 0, max: 10,
+                class: 'nr-ss-sf-input',
+                value: Number(s.retry) || 0,
+                onChange: function (e) { onBaseChange(idx, 'retry', Number(e.target.value)); }
+              })
+            ]));
+            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
+              h('label', '重试间隔(ms)'),
+              h('input', {
+                type: 'number', min: 0, step: 50,
+                class: 'nr-ss-sf-input',
+                value: Number(s.retryIntervalMs) || 0,
+                onChange: function (e) { onBaseChange(idx, 'retryIntervalMs', Number(e.target.value)); }
+              })
+            ]));
+            rows.push(h('div', { class: 'nr-ss-section-title' }, '动作参数'));
+            var schema = (meta_.configSchema && typeof meta_.configSchema === 'object') ? meta_.configSchema : {};
+            var properties = schema;
+            if (schema.type === 'object' && schema.properties && typeof schema.properties === 'object') {
+              properties = schema.properties;
+            }
+            if (!properties || Object.keys(properties).length === 0) {
+              rows.push(h('div', { class: 'nr-ss-subtle' }, '该动作无可配置参数。'));
+            } else {
+              s.config = s.config || {};
+              var ks = Object.keys(properties);
+              for (var i = 0; i < ks.length; i++) {
+                var k = ks[i]; var sch = properties[k] || {};
+                var val = Object.prototype.hasOwnProperty.call(s.config, k)
+                  ? s.config[k]
+                  : (sch.default !== undefined ? sch.default : undefined);
+                rows.push(renderField(idx, k, sch, val));
+              }
+            }
+            rows.push(h('div', { class: 'nr-ss-sf-row', style: { gridTemplateColumns: '1fr 1fr', paddingTop: '10px', borderBottom: 'none' } }, [
+              h('button', {
+                style: { padding: '4px', cursor: 'pointer', border: '1px solid #d9d9d9', borderRadius: '4px', background: '#fff' },
+                onClick: function () { duplicateStep(idx); }
+              }, '📋 复制本步'),
+              h('button', {
+                style: { padding: '4px', cursor: 'pointer', border: '1px solid #ffccc7', color: '#ff4d4f', borderRadius: '4px', background: '#fff2f0' },
+                onClick: function () { removeStep(idx); }
+              }, '🗑 删除本步')
+            ]));
+            return rows;
+          }
+          function renderActionIcon(a) {
+            if (a.icon && a.icon.indexOf('fa-') === 0) return h('i', { class: 'fa ' + a.icon });
+            return h('span', '▸');
+          }
+          return {
+            state: state,
+            groups: groups, actionsByType: actionsByType,
+            addAction: addAction, removeStep: removeStep, duplicateStep: duplicateStep, moveStep: moveStep, clearSteps: clearSteps,
+            onDragStartAction: onDragStartAction,
+            onDragStartStep: onDragStartStep, onDragEndStep: onDragEndStep, onDragOverStep: onDragOverStep, onDropStep: onDropStep,
+            renderForm: renderForm, renderActionIcon: renderActionIcon,
+            summarizeStep: summarizeStep,
+            exportJSON: exportJSON, importJSON: importJSON
+          };
+        },
+        template: '' +
+          '<div class="nr-ss-app">' +
+          '<div class="nr-ss-pane">'+
+            '<div class="nr-ss-pane-header"><span>📚 动作库</span><span style="color:#999;font-weight:normal;">v{{ state.meta.version || "0.1" }}</span></div>' +
+            '<div class="nr-ss-pane-body">' +
+              '<div v-for="g in groups" :key="g.category" class="nr-ss-cat">' +
+                '<div class="nr-ss-cat-title">{{ g.category }}</div>' +
+                '<div v-for="a in g.list" :key="a.type" class="nr-ss-action-item" draggable="true" @dragstart="onDragStartAction($event, a.type)" @dblclick="addAction(a.type)">' +
+                  '<span class="nr-ss-action-icon"><component :is="{render: () => renderActionIcon(a)}" /></span>' +
+                  '<span class="nr-ss-action-type" :title="a.type">{{ a.label || a.type }}</span>' +
+                  '<button class="nr-ss-action-add-btn" @click.stop="addAction(a.type)" title="添加到末尾">+</button>' +
+                '</div>' +
+              '</div>' +
+              '<div style="color:#999;padding:10px 4px;font-size:11px;line-height:1.5;">💡 拖拽动作到中间步骤列表；或双击 / 点「+」直接加在末尾。</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="nr-ss-pane">' +
+            '<div class="nr-ss-pane-header"><span>🧾 步骤列表 ({{ state.steps.length }} 步)</span></div>' +
+            '<div class="nr-ss-pane-body">' +
+              '<div class="nr-ss-tbar">' +
+                '<button @click="clearSteps()" class="danger">🗑 清空</button>' +
+                '<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:3px 8px;border:1px solid #d9d9d9;border-radius:3px;background:#fff;font-size:11px;">📥 导入' +
+                  '<input type="file" accept="application/json,.json" style="display:none;" @change="(e) => { const f = e.target.files && e.target.files[0]; if (f) importJSON(f); e.target.value = \'\'; }">' +
+                '</label>' +
+                '<button @click="exportJSON()">📤 导出</button>' +
+                '<div style="flex:1;"></div>' +
+                '<span v-if="state.status.text" :class="\'nr-ss-msg \' + (state.status.type || \'ok\')" style="padding:2px 8px;margin:0;font-size:11px;">{{ state.status.text }}</span>' +
+              '</div>' +
+              '<div v-if="state.steps.length === 0" class="nr-ss-step-placeholder">暂无步骤。从左侧拖拽动作到这里，或点击动作上的「+」开始编排。</div>' +
+              '<div v-for="(step, idx) in state.steps" :key="step.id || idx" ' +
+                'class="nr-ss-step" :class="{ selected: state.selectedIndex === idx, \'drop-before\': state.dragOverIndex === idx && state.dragOverPos === \'before\', \'drop-after\': state.dragOverIndex === idx && state.dragOverPos === \'after\' }" ' +
+                'draggable="true" @click="state.selectedIndex = idx" @dragstart="onDragStartStep($event, idx)" @dragend="onDragEndStep" @dragover="onDragOverStep($event, idx)" @drop="onDropStep($event, idx)">' +
+                '<span class="nr-ss-step-drag" title="拖拽排序">⋮⋮</span>' +
+                '<div class="nr-ss-step-order">{{ idx + 1 }}</div>' +
+                '<div class="nr-ss-step-title">' +
+                  '<span v-if="step.label" class="nr-ss-step-label">{{ step.label }}</span>' +
+                  '<b>{{ (actionsByType.get(step.type) || {}).label || step.type }}</b>' +
+                  '<small v-if="(actionsByType.get(step.type) || {}).category">· {{ (actionsByType.get(step.type) || {}).category }}</small>' +
+                  '<div style="color:#777;font-size:11px;line-height:1.4;">{{ summarizeStep(step) }}</div>' +
+                '</div>' +
+                '<button class="nr-ss-step-remove" title="删除" @click.stop="removeStep(idx)">✕</button>' +
+              '</div>' +
+              '<div class="nr-ss-add-row" style="margin-top:4px;">' +
+                '<button>+ 未选择步骤时，点击动作库「+」添加</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="nr-ss-pane">' +
+            '<div class="nr-ss-pane-header"><span>🎛 属性配置</span></div>' +
+            '<div class="nr-ss-pane-body"><component :is="{ render: renderForm }"></component></div>' +
+          '</div>' +
+          '</div>'
+      });
+      app.config.errorHandler = function (err, _vm, _info) {
+        try { console.error('[scene-steps editor]', err); } catch (e) {}
+      };
+      app.mount(mountEl);
+    }
+
+    // ============================
+    //  Fallback textarea (CDN 加载失败 / 离线)
+    // ============================
+    function mountFallbackEditor(mountEl, initialSteps, onChange) {
+      mountEl.innerHTML =
+        '<div style="padding:10px;">' +
+        '<h4 style="margin:0 0 8px 0;">Vue3 CDN 未加载（离线或 CSP 限制）</h4>' +
+        '<p style="color:#888;margin:0 0 8px 0;">请以 JSON 方式直接编辑 steps 数组（schema 同运行时 steps）。</p>' +
+        '<textarea id="nr-ss-fallback-textarea" wrap="off" spellcheck="false" style="width:100%;height:440px;font-family:Consolas,Menlo,monospace;font-size:12px;border:1px solid #d9d9d9;border-radius:3px;padding:6px;"></textarea>' +
+        '<p id="nr-ss-fallback-status" style="color:#999;margin-top:6px;font-size:11px;">JSON 格式正确：已解析 ✔</p></div>';
+      var ta = mountEl.querySelector('#nr-ss-fallback-textarea');
+      var st = mountEl.querySelector('#nr-ss-fallback-status');
+      ta.value = JSON.stringify(Array.isArray(initialSteps) && initialSteps.length ? initialSteps : [], null, 2);
+      var debounce = null;
+      ta.addEventListener('input', function () {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(function () {
+          try {
+            var arr = JSON.parse(ta.value);
+            if (!Array.isArray(arr)) throw new Error('不是数组');
+            ta.style.borderColor = '#b7eb8f';
+            st.textContent = 'JSON 格式正确：已解析 ✔ (' + arr.length + ' 步)';
+            st.style.color = '#52c41a';
+            onChange(arr);
+          } catch (e) {
+            ta.style.borderColor = '#ffccc7';
+            st.textContent = 'JSON 格式错误：' + e.message;
+            st.style.color = '#ff4d4f';
+          }
+        }, 150);
+      });
+    }
+
+    // ============================
+    //  Node-RED 节点注册
+    // ============================
+    RED.nodes.registerType('scene-steps', {
+      category: 'function',
+      color: '#8db4dd',
+      defaults: {
+        name: { value: '' },
+        failBehavior: { value: 'stop', required: true },
+        maxLoopLimit: { value: 1000, required: true, validate: RED.validators.number() },
+        defaultStepTimeoutMs: { value: 15000, required: true, validate: RED.validators.number() },
+        steps: { value: [], required: false }
+      },
+      inputs: 1,
+      outputs: 4,
+      outputLabels: ['step', 'done', 'error', 'audit'],
+      icon: 'font-awesome/fa-list-ol.svg',
+      label: function () { return this.name || 'scene-steps'; },
+      paletteLabel: 'scene-steps',
+      align: 'left',
+      oneditprepare: function () {
+        var node = this;
+        var $steps = $('#node-input-steps');
+        var currentSteps = ensureJSON(node.steps || []);
+        try { $steps.val(JSON.stringify(currentSteps)); } catch (e) { $steps.val('[]'); }
+
+        function persist(nextSteps) {
+          currentSteps = ensureJSON(nextSteps);
+          $steps.val(JSON.stringify(currentSteps));
+        }
+
+        var mountEl = document.querySelector('#nr-scene-steps-vue-mount');
+        if (!mountEl) return;
+        // 先尝试元数据加载（离线下也能拿到 DEFAULT_META 兜底）
+        fetchMeta(function (_err, meta) {
+          var metaObj = meta || JSON.parse(JSON.stringify(DEFAULT_META));
+          // 尝试 Vue CDN；5s 后失败就兜底
+          var timeoutId = setTimeout(function () {
+            if (!window.Vue) mountFallbackEditor(mountEl, currentSteps, persist);
+          }, 5000);
+          ensureVueCDN(function (err, Vue) {
+            clearTimeout(timeoutId);
+            if (err || !Vue) { mountFallbackEditor(mountEl, currentSteps, persist); return; }
+            mountVueEditor(Vue, mountEl, metaObj, currentSteps, persist);
+          });
+        });
+      },
+      oneditsave: function () {
+        var $steps = $('#node-input-steps');
+        var v = $steps.val();
+        if (typeof v === 'string' && v.trim()) {
+          try { var arr = JSON.parse(v); if (Array.isArray(arr)) { this.steps = arr; return; } } catch (e) {}
+        }
+        var ta = document.querySelector('#nr-ss-fallback-textarea');
+        if (ta) {
+          try { var arr2 = JSON.parse(ta.value); if (Array.isArray(arr2)) { this.steps = arr2; return; } } catch (e) {}
+        }
+        this.steps = [];
+      },
+      oneditcancel: function () { /* noop */ },
+      oneditresize: function (size) {
+        var box = document.querySelector('#nr-scene-steps-root');
+        if (box && size) {
+          var reserve = 260;
+          var h = Math.max(360, size.height - reserve);
+          box.style.height = h + 'px';
+        }
+      }
+    });
+  })();
+</script>

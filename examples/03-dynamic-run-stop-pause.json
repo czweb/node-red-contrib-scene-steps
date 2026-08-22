@@ -1,0 +1,68 @@
+[
+  {
+    "id": "scene-stop-demo",
+    "type": "tab",
+    "label": "示例3: 动态启停 (Inject stop / pause / resume + 步骤级 failBehavior 覆盖)",
+    "disabled": false,
+    "info": "演示: msg.payload 可直接下发字符串控制 scene-steps 节点:\n  - \"run\" (或省略) 执行步骤\n  - \"stop\" / \"pause\" / \"resume\" 动态启停\n步骤上 failBehaviorOverride 演示单步覆盖节点级策略。"
+  },
+  {
+    "id": "inj-run-3",
+    "type": "inject", "z": "scene-stop-demo",
+    "name": "run", "repeat": "", "crontab": "", "once": false, "onceDelay": 0.1,
+    "topic": "", "payload": "run", "payloadType": "str",
+    "x": 100, "y": 80, "wires": [["sc-3"]]
+  },
+  {
+    "id": "inj-pause-3",
+    "type": "inject", "z": "scene-stop-demo",
+    "name": "pause", "repeat": "", "crontab": "", "once": false, "onceDelay": 0.1,
+    "topic": "", "payload": "pause", "payloadType": "str",
+    "x": 100, "y": 140, "wires": [["sc-3"]]
+  },
+  {
+    "id": "inj-resume-3",
+    "type": "inject", "z": "scene-stop-demo",
+    "name": "resume", "repeat": "", "crontab": "", "once": false, "onceDelay": 0.1,
+    "topic": "", "payload": "resume", "payloadType": "str",
+    "x": 100, "y": 200, "wires": [["sc-3"]]
+  },
+  {
+    "id": "inj-stop-3",
+    "type": "inject", "z": "scene-stop-demo",
+    "name": "stop", "repeat": "", "crontab": "", "once": false, "onceDelay": 0.1,
+    "topic": "", "payload": "stop", "payloadType": "str",
+    "x": 100, "y": 260, "wires": [["sc-3"]]
+  },
+  {
+    "id": "sc-3",
+    "type": "scene-steps", "z": "scene-stop-demo",
+    "name": "长时场景 (可暂停/停止)",
+    "failBehavior": "stop",
+    "maxLoopLimit": 1000,
+    "defaultStepTimeoutMs": 15000,
+    "steps": [
+      { "id": "1", "type": "label", "config": { "name": "HEAD" } },
+      { "id": "2", "type": "delay", "config": { "delayMs": 1000 }, "label": "s1" },
+      { "id": "3", "type": "udp_send", "label": "大屏组播提醒",
+        "config": { "host":"239.255.0.1","port":5001,"payload":"SCENE START {{ vars.sceneName || 'demo' }}\r\n","format":"string","broadcast":true,"waitAck":false,"ackTimeoutMs":0 },
+        "failBehaviorOverride": "skip" },
+      { "id": "4", "type": "delay", "config": { "delayMs": 8000 }, "label": "长延时 (期间可暂停)" },
+      { "id": "5", "type": "jump", "config": { "target": "HEAD", "max": 2, "whenExpr": "" }, "label": "循环2次" },
+      { "id": "6", "type": "stop", "config": { "emitAsDone": true, "reason": "场景正常结束" } }
+    ],
+    "x": 380, "y": 170, "wires": [["st3"],["dn3"],["er3"],["au3"]]
+  },
+  {
+    "id": "st3","type":"debug","z":"scene-stop-demo","name":"Step","active":true,"tosidebar":true,"complete":"true","targetType":"full","x":640,"y":110,"wires":[]
+  },
+  {
+    "id": "dn3","type":"debug","z":"scene-stop-demo","name":"Done","active":true,"tosidebar":true,"complete":"true","targetType":"full","x":640,"y":170,"wires":[]
+  },
+  {
+    "id": "er3","type":"debug","z":"scene-stop-demo","name":"Error","active":true,"tosidebar":true,"console":true,"complete":"true","targetType":"full","x":640,"y":230,"wires":[]
+  },
+  {
+    "id": "au3","type":"debug","z":"scene-stop-demo","name":"Audit","active":true,"tosidebar":false,"complete":"true","targetType":"full","x":640,"y":290,"wires":[]
+  }
+]

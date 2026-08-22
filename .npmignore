@@ -1,0 +1,8 @@
+node_modules/
+test/
+.trae/
+.editorconfig
+.gitignore
+esbuild.config.js
+editor-src/
+!editor-src/dist/

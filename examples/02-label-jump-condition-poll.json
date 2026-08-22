@@ -1,0 +1,113 @@
+[
+  {
+    "id": "scene-loop-demo",
+    "type": "tab",
+    "label": "示例2: 标签+跳转 (条件轮询直到达成 + 超时跳出)",
+    "disabled": false,
+    "info": "演示 label / jump / condition_wait 配合实现轮询。\n也演示 vars.x 和 template 插值在 expression 里的使用。"
+  },
+  {
+    "id": "inj-2",
+    "type": "inject",
+    "z": "scene-loop-demo",
+    "name": "触发",
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 120,
+    "y": 140,
+    "wires": [["sc-2"]]
+  },
+  {
+    "id": "sc-2",
+    "type": "scene-steps",
+    "z": "scene-loop-demo",
+    "name": "等待设备就绪",
+    "failBehavior": "stop",
+    "maxLoopLimit": 500,
+    "defaultStepTimeoutMs": 15000,
+    "steps": [
+      { "id": "a", "type": "label",
+        "config": { "name": "POLL_LOOP" },
+        "label": "" },
+      { "id": "b", "type": "http_request", "label": "取状态",
+        "config": {
+          "url": "http://192.168.1.100/api/status",
+          "method": "GET",
+          "headers": {},
+          "body": "",
+          "bodyJson": false,
+          "bodyEncode": "utf8",
+          "timeoutMs": 3000,
+          "followRedirect": false,
+          "redirectLimit": 3,
+          "responseParse": "json"
+        },
+        "postDelayMs": 1000, "timeoutMs": 0, "failBehaviorOverride": "retry:3",
+        "retry": 3, "retryIntervalMs": 500 },
+      { "id": "c", "type": "condition_wait", "label": "判定 ready",
+        "config": {
+          "expression": "outputs[-1].result !== null && outputs[-1].result.ready === true",
+          "intervalMs": 500,
+          "maxMs": 2000
+        },
+        "postDelayMs": 0, "timeoutMs": 0, "failBehaviorOverride": "" },
+      { "id": "d", "type": "jump", "label": "没就绪就继续",
+        "config": {
+          "target": "POLL_LOOP",
+          "max": 30,
+          "whenExpr": "outputs[-1].status !== 'fulfilled'"
+        }
+      },
+      { "id": "e", "type": "mqtt_publish", "label": "设备就绪事件",
+        "config": {
+          "host": "192.168.1.5", "port": 1883,
+          "topic": "scene/demo/ready",
+          "payload": "{\"device\":\"100\",\"at\":\"{{ Date.now() }}\"}",
+          "format": "auto",
+          "clientId": "", "username": "", "password": "",
+          "connectTimeoutMs": 5000, "responseTimeoutMs": 3000
+        },
+        "postDelayMs": 0, "timeoutMs": 0, "failBehaviorOverride": "skip" }
+    ],
+    "x": 360,
+    "y": 140,
+    "wires": [["step-dbg-2"], ["done-dbg-2"], ["err-dbg-2"], ["audit-dbg-2"]]
+  },
+  {
+    "id": "step-dbg-2",
+    "type": "debug",
+    "z": "scene-loop-demo",
+    "name": "Step",
+    "active": true, "tosidebar": true, "console": false, "tostatus": false,
+    "complete": "true", "targetType": "full", "x": 600, "y": 80, "wires": []
+  },
+  {
+    "id": "done-dbg-2",
+    "type": "debug",
+    "z": "scene-loop-demo",
+    "name": "Done",
+    "active": true, "tosidebar": true, "console": false, "tostatus": false,
+    "complete": "true", "targetType": "full", "x": 600, "y": 140, "wires": []
+  },
+  {
+    "id": "err-dbg-2",
+    "type": "debug",
+    "z": "scene-loop-demo",
+    "name": "Error",
+    "active": true, "tosidebar": true, "console": true, "tostatus": false,
+    "complete": "true", "targetType": "full", "x": 600, "y": 200, "wires": []
+  },
+  {
+    "id": "audit-dbg-2",
+    "type": "debug",
+    "z": "scene-loop-demo",
+    "name": "Audit",
+    "active": true, "tosidebar": false, "console": false, "tostatus": false,
+    "complete": "true", "targetType": "full", "x": 600, "y": 260, "wires": []
+  }
+]
