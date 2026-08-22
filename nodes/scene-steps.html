@@ -85,6 +85,7 @@
     .nr-ss-msg { padding:6px 8px; border-radius:4px; margin:4px 0; }
     .nr-ss-msg.err { background:#fff2f0; color:#ff4d4f; border:1px solid #ffccc7; }
     .nr-ss-msg.ok { background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+    .nr-ss-msg.warn { background:#fffbe6; color:#faad14; border:1px solid #ffe58f; }
     .nr-ss-tbar { display:flex; gap:6px; align-items:center; padding:0 2px 4px 2px; border-bottom:1px solid #f0f0f0; margin-bottom:4px; }
     .nr-ss-tbar button { padding:3px 8px; border:1px solid #d9d9d9; background:#fff; border-radius:3px; cursor:pointer; font-size:11px; }
     .nr-ss-tbar button:hover { border-color:var(--primary); color:var(--primary); }
@@ -284,8 +285,19 @@
             persist();
           }
           function clearSteps() {
-            if (!confirm('确定清空全部 ' + state.steps.length + ' 步？')) return;
-            state.steps = []; state.selectedIndex = -1; persist();
+            // 不使用原生 confirm：内置浏览器可能拦截或返回 undefined
+            if (state.steps.length === 0) { setStatus('ok', '已是空'); return; }
+            state._pendingClear = !state._pendingClear;
+            if (state._pendingClear) {
+              setStatus('warn', '再次点击「清空」以确认清除 ' + state.steps.length + ' 步');
+              setTimeout(function () { state._pendingClear = false; }, 3000);
+              return;
+            }
+            state.steps = []; state.selectedIndex = -1;
+            // 同步清空高级选项展开状态，避免遗留 stale id
+            state.advOpen = {};
+            persist();
+            setStatus('ok', '已清空');
           }
           function onDragStartStep(e, idx) {
             state.dragIndex = idx;
@@ -465,8 +477,9 @@
           }
           function renderForm() {
             var idx = state.selectedIndex;
-            if (idx < 0) return h('div', { class: 'nr-ss-subtle' }, '请先在中间步骤列表里选择要编辑的步骤。\n\n💡 您可以：\n  1) 从左栏动作库拖动项到中间；\n  2) 双击动作库条目；\n  3) 点击动作库右侧「+」。');
+            if (idx < 0 || idx >= state.steps.length) return h('div', { class: 'nr-ss-subtle' }, '请先在中间步骤列表里选择要编辑的步骤。\n\n💡 您可以：\n  1) 从左栏动作库拖动项到中间；\n  2) 双击动作库条目；\n  3) 点击动作库右侧「+」。');
             var s = state.steps[idx];
+            if (!s) return h('div', { class: 'nr-ss-subtle' }, '步骤数据为空（可能正在清空）。');
             var meta_ = stepMeta(idx);
             if (!meta_) return h('div', { class: 'nr-ss-subtle' }, '未找到 action 定义: ' + s.type);
             var rows = [];
@@ -653,6 +666,16 @@
       });
       app.config.errorHandler = function (err, _vm, _info) {
         try { console.error('[scene-steps editor]', err); } catch (e) {}
+        try {
+          var box = document.getElementById('nr-scene-steps-err-banner');
+          if (!box) {
+            box = document.createElement('div');
+            box.id = 'nr-scene-steps-err-banner';
+            box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff4d4f;color:#fff;font:12px/1.5 monospace;padding:6px 10px;white-space:pre-wrap;max-height:40vh;overflow:auto';
+            document.body.appendChild(box);
+          }
+          box.textContent = '编辑器渲染错误: ' + (err && err.message ? err.message : String(err)) + '\n\n' + (err && err.stack ? err.stack : '');
+        } catch (e2) {}
       };
       app.mount(mountEl);
     }
