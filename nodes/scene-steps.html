@@ -89,6 +89,17 @@
     .nr-ss-tbar button { padding:3px 8px; border:1px solid #d9d9d9; background:#fff; border-radius:3px; cursor:pointer; font-size:11px; }
     .nr-ss-tbar button:hover { border-color:var(--primary); color:var(--primary); }
     .nr-ss-tbar button.danger:hover { border-color:var(--danger); color:var(--danger); }
+    /* 高级选项折叠面板 */
+    .nr-ss-adv { border:1px solid #eef0f3; border-radius:4px; background:#fafbfc; margin:6px 0; }
+    .nr-ss-adv-summary { display:flex; align-items:center; gap:6px; padding:6px 8px; cursor:pointer; user-select:none; border-radius:4px; }
+    .nr-ss-adv-summary:hover { background:#f0f3f7; }
+    .nr-ss-adv-summary.open { border-bottom:1px solid #eef0f3; border-radius:4px 4px 0 0; }
+    .nr-ss-adv-arrow { color:#999; font-size:11px; transition:transform .15s; width:12px; text-align:center; }
+    .nr-ss-adv-arrow.open { transform:rotate(90deg); color:var(--primary); }
+    .nr-ss-adv-summary > span:nth-of-type(1) { font-weight:600; color:#444; font-size:12px; }
+    .nr-ss-adv-hint { color:#bbb; font-size:11px; }
+    .nr-ss-adv-badge { color:#fff; background:var(--warn); font-size:10px; padding:1px 6px; border-radius:9px; line-height:1.4; }
+    .nr-ss-adv-body { padding:6px 8px 8px 8px; }
   </style>
 </script>
 
@@ -209,7 +220,9 @@
             dragIndex: -1,
             dragOverIndex: -1,
             dragOverPos: null,
-            status: { type: '', text: '' }
+            status: { type: '', text: '' },
+            // 步骤级「高级选项」折叠面板展开状态，key 为 step.id
+            advOpen: {}
           });
           var actionsByType = computed(function () {
             var m = new Map();
@@ -325,6 +338,27 @@
           function onBaseChange(idx, key, value) {
             var s = state.steps[idx]; if (!s) return;
             s[key] = value; persist();
+          }
+          // 计算步骤级「高级选项」中非默认值的字段数（用于徽章提示）
+          // 与 renderForm 中默认占位保持一致：timeoutMs/postDelayMs 默认 0、
+          // failBehaviorOverride 默认 ''、retry 默认 3、retryIntervalMs 默认 500
+          function advancedCustomCount(s) {
+            if (!s) return 0;
+            var n = 0;
+            if (Number(s.timeoutMs) || 0) n++;
+            if (Number(s.postDelayMs) || 0) n++;
+            if (s.failBehaviorOverride && s.failBehaviorOverride !== '') n++;
+            // retry 默认 3，导入旧数据可能为 0，二者均视为默认
+            var r = Number(s.retry);
+            if (!isNaN(r) && r !== 3 && r !== 0) n++;
+            // retryIntervalMs 默认 500，0 也算默认（避免误报）
+            var ri = Number(s.retryIntervalMs);
+            if (!isNaN(ri) && ri !== 500 && ri !== 0) n++;
+            return n;
+          }
+          function toggleAdv(stepId) {
+            if (!stepId) return;
+            state.advOpen[stepId] = !state.advOpen[stepId];
           }
           function exportJSON() {
             var text = JSON.stringify(state.steps, null, 2);
@@ -448,58 +482,75 @@
                 onChange: function (e) { onBaseChange(idx, 'label', e.target.value); }
               })
             ]));
-            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
-              h('label', '步骤超时(ms)'),
-              h('input', {
-                type: 'number', min: 0, step: 50,
-                class: 'nr-ss-sf-input',
-                value: Number(s.timeoutMs) || 0,
-                placeholder: '0 = 使用节点默认',
-                onChange: function (e) { onBaseChange(idx, 'timeoutMs', Number(e.target.value)); }
-              })
-            ]));
-            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
-              h('label', '完成后延时(ms)'),
-              h('input', {
-                type: 'number', min: 0, step: 50,
-                class: 'nr-ss-sf-input',
-                value: Number(s.postDelayMs) || 0,
-                placeholder: '下一步前等待(ms)',
-                onChange: function (e) { onBaseChange(idx, 'postDelayMs', Number(e.target.value)); }
-              })
-            ]));
-            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
-              h('label', '失败策略'),
-              h('select', {
-                class: 'nr-ss-sf-select',
-                value: s.failBehaviorOverride || '',
-                onChange: function (e) { onBaseChange(idx, 'failBehaviorOverride', e.target.value); }
+            // 高级选项折叠面板：5 个通用属性默认收起，非默认值时徽章提示
+            var customN = advancedCustomCount(s);
+            var isOpen = !!state.advOpen[s.id];
+            rows.push(h('div', { class: 'nr-ss-adv' }, [
+              h('div', {
+                class: 'nr-ss-adv-summary' + (isOpen ? ' open' : ''),
+                onClick: function (e) { e.preventDefault(); toggleAdv(s.id); }
               }, [
-                h('option', { value: '' }, '（继承节点级）'),
-                h('option', { value: 'stop' }, 'stop 中止'),
-                h('option', { value: 'skip' }, 'skip 跳过'),
-                h('option', { value: 'retry' }, 'retry 1 次'),
-                h('option', { value: 'retry:3' }, 'retry 3 次'),
-                h('option', { value: 'retry:5' }, 'retry 5 次')
-              ])
-            ]));
-            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
-              h('label', '重试次数上限'),
-              h('input', {
-                type: 'number', min: 0, max: 10,
-                class: 'nr-ss-sf-input',
-                value: Number(s.retry) || 0,
-                onChange: function (e) { onBaseChange(idx, 'retry', Number(e.target.value)); }
-              })
-            ]));
-            rows.push(h('div', { class: 'nr-ss-sf-row' }, [
-              h('label', '重试间隔(ms)'),
-              h('input', {
-                type: 'number', min: 0, step: 50,
-                class: 'nr-ss-sf-input',
-                value: Number(s.retryIntervalMs) || 0,
-                onChange: function (e) { onBaseChange(idx, 'retryIntervalMs', Number(e.target.value)); }
-              })
+                h('i', { class: 'fa fa-chevron-right nr-ss-adv-arrow' + (isOpen ? ' open' : '') }),
+                h('span', '高级选项'),
+                customN
+                  ? h('span', { class: 'nr-ss-adv-badge', title: customN + ' 项已自定义' }, '已自定义 ' + customN)
+                  : h('span', { class: 'nr-ss-adv-hint' }, '超时/延时/失败策略/重试')
+              ]),
+              isOpen ? h('div', { class: 'nr-ss-adv-body' }, [
+                h('div', { class: 'nr-ss-sf-row' }, [
+                  h('label', '步骤超时(ms)'),
+                  h('input', {
+                    type: 'number', min: 0, step: 50,
+                    class: 'nr-ss-sf-input',
+                    value: Number(s.timeoutMs) || 0,
+                    placeholder: '0 = 使用节点默认',
+                    onChange: function (e) { onBaseChange(idx, 'timeoutMs', Number(e.target.value)); }
+                  })
+                ]),
+                h('div', { class: 'nr-ss-sf-row' }, [
+                  h('label', '完成后延时(ms)'),
+                  h('input', {
+                    type: 'number', min: 0, step: 50,
+                    class: 'nr-ss-sf-input',
+                    value: Number(s.postDelayMs) || 0,
+                    placeholder: '下一步前等待(ms)',
+                    onChange: function (e) { onBaseChange(idx, 'postDelayMs', Number(e.target.value)); }
+                  })
+                ]),
+                h('div', { class: 'nr-ss-sf-row' }, [
+                  h('label', '失败策略'),
+                  h('select', {
+                    class: 'nr-ss-sf-select',
+                    value: s.failBehaviorOverride || '',
+                    onChange: function (e) { onBaseChange(idx, 'failBehaviorOverride', e.target.value); }
+                  }, [
+                    h('option', { value: '' }, '（继承节点级）'),
+                    h('option', { value: 'stop' }, 'stop 中止'),
+                    h('option', { value: 'skip' }, 'skip 跳过'),
+                    h('option', { value: 'retry' }, 'retry 1 次'),
+                    h('option', { value: 'retry:3' }, 'retry 3 次'),
+                    h('option', { value: 'retry:5' }, 'retry 5 次')
+                  ])
+                ]),
+                h('div', { class: 'nr-ss-sf-row' }, [
+                  h('label', '重试次数上限'),
+                  h('input', {
+                    type: 'number', min: 0, max: 10,
+                    class: 'nr-ss-sf-input',
+                    value: Number(s.retry) || 0,
+                    onChange: function (e) { onBaseChange(idx, 'retry', Number(e.target.value)); }
+                  })
+                ]),
+                h('div', { class: 'nr-ss-sf-row' }, [
+                  h('label', '重试间隔(ms)'),
+                  h('input', {
+                    type: 'number', min: 0, step: 50,
+                    class: 'nr-ss-sf-input',
+                    value: Number(s.retryIntervalMs) || 0,
+                    onChange: function (e) { onBaseChange(idx, 'retryIntervalMs', Number(e.target.value)); }
+                  })
+                ])
+              ]) : null
             ]));
             rows.push(h('div', { class: 'nr-ss-section-title' }, '动作参数'));
             var schema = (meta_.configSchema && typeof meta_.configSchema === 'object') ? meta_.configSchema : {};
