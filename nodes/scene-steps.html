@@ -68,9 +68,14 @@
     }
     #nr-scene-steps-root * { box-sizing:border-box; font-size:12px; }
     #nr-scene-steps-root { --border:#d9d9d9; --primary:#1677ff; --danger:#ff4d4f; --warn:#faad14; --bg:#fafafa; }
-    .nr-ss-app { display:grid; grid-template-columns: 200px 1fr 320px; height:100%; }
-    .nr-ss-pane { overflow:hidden; display:flex; flex-direction:column; border-right:1px solid var(--border); }
-    .nr-ss-pane:last-child { border-right:none; }
+    /* 三栏宽度：col1/col3 由 Vue 以 CSS 变量注入（localStorage 记忆），中栏 1fr 自适应 */
+    .nr-ss-app { display:grid; grid-template-columns: var(--col1, 200px) 7px 1fr 7px var(--col3, 320px); height:100%; }
+    .nr-ss-pane { overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+    /* 列间拖拽条：默认 1px 分隔线 + 3px 抓手，hover/拖拽中变蓝加长 */
+    .nr-ss-resizer { position:relative; cursor:col-resize; }
+    .nr-ss-resizer::before { content:''; position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); width:1px; background:var(--border); }
+    .nr-ss-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:3px; height:28px; border-radius:2px; background:#c0c6cf; transition:background .12s, height .12s; }
+    .nr-ss-resizer:hover::after, .nr-ss-resizer.active::after { background:var(--primary); height:48px; }
     .nr-ss-pane-header { padding:6px 10px; font-weight:600; background:#f5f7fa; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
     .nr-ss-pane-body { flex:1; overflow:auto; padding:6px; }
     .nr-ss-cat { margin-bottom:6px; }
@@ -246,6 +251,34 @@
     }
 
     // ============================
+    //  三栏列宽记忆（localStorage 跨会话恢复 动作库/属性配置 两栏宽度，中栏自适应）
+    // ============================
+    var COLUMN_SIZE_KEY = 'scene-steps.editor.columns';
+    var COL1_MIN = 140, COL1_MAX = 420, COL1_DEF = 200; // 左栏：动作库
+    var COL3_MIN = 220, COL3_MAX = 600, COL3_DEF = 320; // 右栏：属性配置
+    function clampCol(which, v) {
+      v = Math.round(v);
+      if (isNaN(v)) return which === 1 ? COL1_DEF : COL3_DEF;
+      return which === 1 ? Math.min(COL1_MAX, Math.max(COL1_MIN, v))
+                          : Math.min(COL3_MAX, Math.max(COL3_MIN, v));
+    }
+    function loadColumnSizes() {
+      try {
+        var raw = localStorage.getItem(COLUMN_SIZE_KEY);
+        if (!raw) return null;
+        var obj = JSON.parse(raw);
+        if (obj && typeof obj.col1 === 'number' && typeof obj.col3 === 'number') {
+          // 读取时同样夹取到合法区间，避免历史数据/手改 localStorage 越界
+          return { col1: clampCol(1, obj.col1), col3: clampCol(3, obj.col3) };
+        }
+      } catch (e) {}
+      return null;
+    }
+    function saveColumnSizes(col1, col3) {
+      try { localStorage.setItem(COLUMN_SIZE_KEY, JSON.stringify({ col1: col1, col3: col3, ts: Date.now() })); } catch (e) {}
+    }
+
+    // ============================
     //  编辑器尺寸记忆（localStorage 跨会话恢复 tray 宽高）
     // ============================
     var EDITOR_SIZE_KEY = 'scene-steps.editor.size';
@@ -316,7 +349,9 @@
             dragOverPos: null,
             status: { type: '', text: '' },
             // 步骤级「高级选项」折叠面板展开状态，key 为 step.id
-            advOpen: {}
+            advOpen: {},
+            // 三栏列宽拖拽中标记：1=左分隔条(调动作库) 3=右分隔条(调属性配置) 0=非拖拽
+            resizingWhich: 0
           });
           var actionsByType = computed(function () {
             var m = new Map();
@@ -332,6 +367,40 @@
             });
             return Array.from(gs.entries()).map(function (kv) { return { category: kv[0], list: kv[1] }; });
           });
+          // ===== 三栏列宽：初始取 localStorage 记忆值（无记录用默认），拖拽结束落盘 =====
+          var savedCols = loadColumnSizes() || { col1: COL1_DEF, col3: COL3_DEF };
+          var colSizes = reactive({ col1: savedCols.col1, col3: savedCols.col3 });
+          var colStyle = computed(function () {
+            return { '--col1': colSizes.col1 + 'px', '--col3': colSizes.col3 + 'px' };
+          });
+          // mousedown 在分隔条上：document 级 mousemove/mouseup 完成拖拽；左栏随鼠标同向、右栏反向
+          function startResize(e, which) {
+            if (e.button !== 0) return; // 仅左键
+            e.preventDefault();          // 阻止拖拽中选中文本
+            e.stopPropagation();
+            state.resizingWhich = which;
+            var startX = e.clientX;
+            var startW = which === 1 ? colSizes.col1 : colSizes.col3;
+            var key = which === 1 ? 'col1' : 'col3';
+            function onMove(ev) {
+              var dx = ev.clientX - startX;
+              colSizes[key] = clampCol(which, which === 1 ? startW + dx : startW - dx);
+            }
+            function onUp() {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+              state.resizingWhich = 0;
+              saveColumnSizes(colSizes.col1, colSizes.col3); // 记忆列宽
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }
+          // 双击分隔条：该栏恢复默认宽度并落盘
+          function resetColumn(which) {
+            if (which === 1) colSizes.col1 = COL1_DEF;
+            else colSizes.col3 = COL3_DEF;
+            saveColumnSizes(colSizes.col1, colSizes.col3);
+          }
           function deepClone(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return o; } }
           function genId() { return 'st_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
           function setStatus(t, msg) {
@@ -716,11 +785,12 @@
             onDragStartStep: onDragStartStep, onDragEndStep: onDragEndStep, onDragOverStep: onDragOverStep, onDropStep: onDropStep,
             renderForm: renderForm, renderActionIcon: renderActionIcon,
             summarizeStep: summarizeStep,
+            colStyle: colStyle, startResize: startResize, resetColumn: resetColumn,
             exportJSON: exportJSON, importJSON: importJSON
           };
         },
         template: '' +
-          '<div class="nr-ss-app">' +
+          '<div class="nr-ss-app" :style="colStyle">' +
           '<div class="nr-ss-pane">'+
             '<div class="nr-ss-pane-header"><span>📚 动作库</span><span style="color:#999;font-weight:normal;">v{{ state.meta.version || "0.1" }}</span></div>' +
             '<div class="nr-ss-pane-body">' +
@@ -735,6 +805,7 @@
               '<div style="color:#999;padding:10px 4px;font-size:11px;line-height:1.5;">💡 拖拽动作到中间步骤列表；或双击 / 点「+」直接加在末尾。</div>' +
             '</div>' +
           '</div>' +
+          '<div class="nr-ss-resizer" :class="{ active: state.resizingWhich === 1 }" title="拖拽调节「动作库」宽度 · 双击恢复默认" @mousedown="startResize($event, 1)" @dblclick="resetColumn(1)"></div>' +
           '<div class="nr-ss-pane">' +
             '<div class="nr-ss-pane-header"><span>🧾 步骤列表 ({{ state.steps.length }} 步)</span></div>' +
             '<div class="nr-ss-pane-body">' +
@@ -766,6 +837,7 @@
               '</div>' +
             '</div>' +
           '</div>' +
+          '<div class="nr-ss-resizer" :class="{ active: state.resizingWhich === 3 }" title="拖拽调节「属性配置」宽度 · 双击恢复默认" @mousedown="startResize($event, 3)" @dblclick="resetColumn(3)"></div>' +
           '<div class="nr-ss-pane">' +
             '<div class="nr-ss-pane-header"><span>🎛 属性配置</span></div>' +
             '<div class="nr-ss-pane-body"><component :is="{ render: renderForm }"></component></div>' +
