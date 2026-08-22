@@ -10,7 +10,7 @@ const url = require('url');
 const { URL } = require('url');
 const { SceneError } = require('../nodes/lib/errors');
 
-function applyHeadersHeadersCaseInsensitive(headers, name, value) {
+function applyHeadersCaseInsensitive(headers, name, value) {
   for (const k of Object.keys(headers)) {
     if (k.toLowerCase() === name.toLowerCase()) { headers[k] = value; return; }
   }
