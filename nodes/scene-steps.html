@@ -10,42 +10,38 @@
 --->
 
 <script type="text/x-red" data-template-name="scene-steps">
-  <!-- Node-RED 默认属性：顶部仅「名称」可见；sceneId 系统级隐藏；
-       失败策略/默认步骤超时/跳转循环上限 收纳进「高级选项」折叠面板 -->
-  <div class="nr-ss-top-grid">
-    <div class="form-row">
-      <label for="node-input-name"><i class="fa fa-tag"></i> 名称</label>
-      <input type="text" id="node-input-name" placeholder="scene-steps">
-    </div>
-  </div>
-
-  <!-- 高级选项折叠面板（默认收起；非默认值时徽章提示） -->
-  <div class="nr-ss-top-adv" id="nr-ss-top-adv">
-    <div class="nr-ss-top-adv-header" id="nr-ss-top-adv-toggle">
+  <!-- Node-RED 默认属性：顶部单行（名称 label + 输入框 + 高级选项按钮），sceneId 系统级隐藏；
+       失败策略/默认步骤超时/跳转循环上限 收纳进「高级选项」折叠面板，展开时落在名称输入框下方 -->
+  <div class="nr-ss-top-row">
+    <label for="node-input-name" class="nr-ss-top-name-label"><i class="fa fa-tag"></i> 名称</label>
+    <input type="text" id="node-input-name" placeholder="scene-steps" class="nr-ss-top-name-input">
+    <button type="button" id="nr-ss-top-adv-toggle" class="nr-ss-top-adv-btn" title="失败策略 / 默认步骤超时 / 跳转循环上限">
       <span class="nr-ss-top-adv-arrow">▶</span>
       <span class="nr-ss-top-adv-title">高级选项</span>
-      <span class="nr-ss-top-adv-sub">失败策略 / 超时 / 循环上限</span>
+      <span class="nr-ss-top-adv-sub">失败策略/超时/循环</span>
       <span class="nr-ss-top-adv-badge" id="nr-ss-top-adv-badge"></span>
+    </button>
+  </div>
+
+  <!-- 高级选项折叠面板：默认收起；展开时 3 字段平铺在名称输入框下方 -->
+  <div class="nr-ss-top-adv-body nr-ss-top-grid" id="nr-ss-top-adv-body" style="display:none">
+    <div class="form-row">
+      <label for="node-input-failBehavior"><i class="fa fa-exclamation-triangle"></i> 失败策略</label>
+      <select id="node-input-failBehavior">
+        <option value="stop">stop: 中止执行（报错）</option>
+        <option value="skip" selected>skip: 跳过当前步</option>
+        <option value="retry">retry: 重试 1 次</option>
+        <option value="retry:3">retry:3: 重试 3 次</option>
+        <option value="retry:5">retry:5: 重试 5 次</option>
+      </select>
     </div>
-    <div class="nr-ss-top-adv-body nr-ss-top-grid" style="display:none">
-      <div class="form-row">
-        <label for="node-input-failBehavior"><i class="fa fa-exclamation-triangle"></i> 失败策略</label>
-        <select id="node-input-failBehavior">
-          <option value="stop">stop: 中止执行（报错）</option>
-          <option value="skip" selected>skip: 跳过当前步</option>
-          <option value="retry">retry: 重试 1 次</option>
-          <option value="retry:3">retry:3: 重试 3 次</option>
-          <option value="retry:5">retry:5: 重试 5 次</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label for="node-input-defaultStepTimeoutMs"><i class="fa fa-clock-o"></i> 默认步骤超时</label>
-        <input type="number" id="node-input-defaultStepTimeoutMs" min="50" step="50" placeholder="默认 15000 ms">
-      </div>
-      <div class="form-row">
-        <label for="node-input-maxLoopLimit"><i class="fa fa-repeat"></i> 跳转循环上限</label>
-        <input type="number" id="node-input-maxLoopLimit" min="1" step="1" placeholder="默认 1000">
-      </div>
+    <div class="form-row">
+      <label for="node-input-defaultStepTimeoutMs"><i class="fa fa-clock-o"></i> 默认步骤超时</label>
+      <input type="number" id="node-input-defaultStepTimeoutMs" min="50" step="50" placeholder="默认 15000 ms">
+    </div>
+    <div class="form-row">
+      <label for="node-input-maxLoopLimit"><i class="fa fa-repeat"></i> 跳转循环上限</label>
+      <input type="number" id="node-input-maxLoopLimit" min="1" step="1" placeholder="默认 1000">
     </div>
   </div>
 
@@ -128,18 +124,21 @@
     .nr-ss-adv-hint { color:#bbb; font-size:11px; }
     .nr-ss-adv-badge { color:#fff; background:var(--warn); font-size:10px; padding:1px 6px; border-radius:9px; line-height:1.4; }
     .nr-ss-adv-body { padding:6px 8px 8px 8px; }
-    /* 顶部「高级选项」折叠面板（与步骤级 .nr-ss-adv 同模式但前缀 top- 避免冲突） */
-    .nr-ss-top-adv { border:1px solid #eef0f3; border-radius:4px; background:#fafbfc; margin:0 0 6px 0; }
-    .nr-ss-top-adv.expanded { background:#fff; }
-    .nr-ss-top-adv-header { display:flex; align-items:center; gap:6px; padding:6px 8px; cursor:pointer; user-select:none; border-radius:4px; }
-    .nr-ss-top-adv-header:hover { background:#f0f3f7; }
-    .nr-ss-top-adv.expanded .nr-ss-top-adv-header { border-bottom:1px solid #eef0f3; border-radius:4px 4px 0 0; }
-    .nr-ss-top-adv-arrow { color:#999; font-size:11px; width:12px; text-align:center; transition:transform .15s; }
-    .nr-ss-top-adv.expanded .nr-ss-top-adv-arrow { transform:rotate(90deg); color:var(--primary); }
-    .nr-ss-top-adv-title { font-weight:600; color:#444; font-size:12px; }
-    .nr-ss-top-adv-sub { color:#bbb; font-size:11px; flex:1; }
-    .nr-ss-top-adv-badge { color:#fff; background:var(--warn); font-size:10px; padding:1px 6px; border-radius:9px; line-height:1.4; display:none; }
-    .nr-ss-top-adv-body { padding:6px 8px 8px 8px; }
+    /* 顶部单行：名称 label + 名称 input + 高级选项按钮 同行 flex */
+    .nr-ss-top-row { display:flex; align-items:center; gap:8px; margin:0 0 6px 0; }
+    .nr-ss-top-name-label { margin:0; width:auto; font-size:12px; white-space:nowrap; }
+    .nr-ss-top-name-input { flex:1 1 auto; width:auto; min-width:0; box-sizing:border-box; }
+    /* 高级选项按钮：紧贴名称输入框右侧 */
+    .nr-ss-top-adv-btn { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border:1px solid #d9d9d9; background:#fff; border-radius:4px; cursor:pointer; font-size:12px; white-space:nowrap; }
+    .nr-ss-top-adv-btn:hover { background:#f0f3f7; border-color:#91caff; }
+    .nr-ss-top-adv-btn .nr-ss-top-adv-arrow { color:#999; font-size:11px; transition:transform .15s; }
+    .nr-ss-top-adv-btn.expanded .nr-ss-top-adv-arrow { transform:rotate(90deg); color:var(--primary); }
+    .nr-ss-top-adv-btn .nr-ss-top-adv-title { font-weight:600; color:#444; }
+    .nr-ss-top-adv-btn .nr-ss-top-adv-sub { color:#bbb; font-size:11px; }
+    .nr-ss-top-adv-btn .nr-ss-top-adv-badge { color:#fff; background:var(--warn); font-size:10px; padding:1px 6px; border-radius:9px; line-height:1.4; display:none; }
+    /* 折叠面板体：3 列平铺，展开时落在名称输入框下方 */
+    .nr-ss-top-adv-body { padding:6px 0 8px 0; }
+    .nr-ss-top-adv-body.expanded { background:#fafbfc; border:1px solid #eef0f3; border-radius:4px; padding:6px 8px 8px 8px; }
   </style>
 </script>
 
@@ -921,9 +920,10 @@
         }
         $('#nr-ss-top-adv-toggle').off('click.topadv').on('click.topadv', function () {
           topAdvOpen = !topAdvOpen;
-          $('.nr-ss-top-adv-body').slideToggle(120);
+          $('#nr-ss-top-adv-body').slideToggle(120);
           $('.nr-ss-top-adv-arrow').text(topAdvOpen ? '▼' : '▶');
-          $('.nr-ss-top-adv').toggleClass('expanded', topAdvOpen);
+          $('#nr-ss-top-adv-toggle').toggleClass('expanded', topAdvOpen);
+          $('#nr-ss-top-adv-body').toggleClass('expanded', topAdvOpen);
           updateTopAdvBadge();
         });
         $('#node-input-failBehavior,#node-input-defaultStepTimeoutMs,#node-input-maxLoopLimit')
