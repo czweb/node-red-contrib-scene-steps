@@ -48,6 +48,8 @@ async function runSteps(steps, opts) {
   const runId = genRunId();
   const emit = typeof options.emit === 'function' ? options.emit : () => {};
   const ancestors = Array.isArray(options.ancestors) ? options.ancestors.slice() : [];
+  // sceneAncestors: 跟踪被调用的 sceneId 链，用于 ref_scene 间接循环检测 A→B→C→A
+  const sceneAncestors = Array.isArray(options.sceneAncestors) ? options.sceneAncestors.slice() : [];
   const redNode = options.redNode || null;
   const signal = options.signal || null;   // CancelSignal
 
@@ -59,9 +61,19 @@ async function runSteps(steps, opts) {
     .join('|');
   const selfAncestorKey = `call_scene(${selfFingerprint})`;
   if (selfFingerprint && ancestors.indexOf(selfAncestorKey) !== -1) {
-    throw SceneError.fromCode('NESTED_RECURSION', `子场景递归: ${selfFingerprint}`);
+    throw SceneError.fromCode('NESTED_RECURSION', `子场景递归(指纹): ${selfFingerprint}`);
   }
   ancestors.push(selfAncestorKey);
+
+  // sceneId 查重：若本场景的 sceneId 已经在 sceneAncestors 链中（祖先链上某场景已调过本场景），
+  // 视为间接循环（A→B→C→A）。sceneAncestors 由父 runNested 透传，已包含所有祖先场景的 sceneId。
+  // 顶层调用时 options.selfSceneId 是当前节点 sceneId，sceneAncestors 为 []，不会命中自己。
+  const selfSceneId = options.selfSceneId || '';
+  if (selfSceneId && sceneAncestors.indexOf(selfSceneId) !== -1) {
+    throw SceneError.fromCode('NESTED_RECURSION', `子场景递归(sceneId): ${selfSceneId}，调用链: ${sceneAncestors.join(' → ')} → ${selfSceneId}`);
+  }
+  // 把当前场景加入链尾，供子调用查重
+  if (selfSceneId) sceneAncestors.push(selfSceneId);
 
   // 祖先链 / 深度检查（子场景调用时由 call_scene 传入 ancestors）
   if (ancestors.length > options.maxDepth) {
@@ -136,8 +148,12 @@ async function runSteps(steps, opts) {
         maxLoopLimit: options.maxLoopLimit,
         ancestors,
         // call_scene 内部再调 runSteps 时用：
-        runNested: (subSteps, extraAncestor) => runSteps(subSteps, Object.assign({}, options, {
+        // childSceneId: 由 call_scene ref_scene 模式传入被调用场景的 sceneId，作为子 runSteps 的 selfSceneId
+        // sceneAncestors 已含父场景 sceneId，直接透传（子入口会再 push 自己的 sceneId）
+        runNested: (subSteps, extraAncestor, childSceneId) => runSteps(subSteps, Object.assign({}, options, {
           ancestors: ancestors.concat([extraAncestor || ('depth-' + ancestors.length)]),
+          sceneAncestors: sceneAncestors.slice(),
+          selfSceneId: childSceneId || '',
           inputMsg: { vars: state.vars, payload: null },
           emit: (ev) => { /* 子场景 emit 过滤：只转发 step 消息给外部 */ if (ev.kind === 'step' || ev.kind === 'error') emit(ev); }
         }))

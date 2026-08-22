@@ -10,10 +10,15 @@
 --->
 
 <script type="text/x-red" data-template-name="scene-steps">
-  <!-- Node-RED 默认属性（name / failBehavior / maxLoopLimit / defaultStepTimeoutMs） -->
+  <!-- Node-RED 默认属性（name / sceneId / failBehavior / maxLoopLimit / defaultStepTimeoutMs） -->
   <div class="form-row">
     <label for="node-input-name"><i class="fa fa-tag"></i> 名称</label>
     <input type="text" id="node-input-name" placeholder="scene-steps">
+  </div>
+  <div class="form-row">
+    <label for="node-input-sceneId"><i class="fa fa-hashtag"></i> 场景 ID</label>
+    <input type="text" id="node-input-sceneId" placeholder="自动生成，可手填；用于其他场景通过 call_scene 引用本场景" style="width:calc(100% - 150px)">
+    <button type="button" id="nr-ss-gen-sceneId" style="margin-left:6px;padding:3px 8px;border:1px solid #d9d9d9;background:#fff;border-radius:3px;cursor:pointer;font-size:11px;">🎲 生成</button>
   </div>
   <div class="form-row">
     <label for="node-input-failBehavior"><i class="fa fa-exclamation-triangle"></i> 失败策略</label>
@@ -154,8 +159,8 @@
           configSchema: { target: { type: 'string', default: '', label: '目标标签名', required: true }, max: { type: 'number', min: 1, default: 10, label: '最大跳转次数' }, whenExpr: { type: 'string', default: '', label: '条件表达式(可选)', format: 'textarea' } },
           defaults: { target: '', max: 10, whenExpr: '' } },
         { type: 'call_scene',       category: 'flow',    icon: 'fa-film',          label: '子场景',
-          configSchema: { mode: { type: 'string', enum: ['inline_steps','steps_from_var'], default: 'inline_steps', label: '模式' }, inline_steps: { type: 'object', default: [], label: '内嵌步骤数组(JSON)' }, stepsVar: { type: 'string', default: '', label: '变量名(mode=steps_from_var)' }, inheritVars: { type: 'boolean', default: true, label: '继承变量' }, injectVars: { type: 'object', default: {}, label: '注入变量(JSON)' } },
-          defaults: { mode: 'inline_steps', inline_steps: [], stepsVar: '', inheritVars: true, injectVars: {} } },
+          configSchema: { mode: { type: 'string', enum: ['ref_scene','inline_steps','steps_from_var'], default: 'ref_scene', label: '模式' }, refSceneId: { type: 'string', default: '', label: '引用场景(mode=ref_scene)', format: 'select-scene' }, inline_steps: { type: 'object', default: [], label: '内嵌步骤数组(JSON)' }, stepsVar: { type: 'string', default: '', label: '变量名(mode=steps_from_var)' }, inheritVars: { type: 'boolean', default: true, label: '继承变量' }, injectVars: { type: 'object', default: {}, label: '注入变量(JSON)' } },
+          defaults: { mode: 'ref_scene', refSceneId: '', inline_steps: [], stepsVar: '', inheritVars: true, injectVars: {} } },
         { type: 'condition_wait',   category: 'flow',    icon: 'fa-clock-o',       label: '等待条件',
           configSchema: { expression: { type: 'string', default: '', label: '表达式', format: 'textarea', required: true }, intervalMs: { type: 'number', min: 1, default: 200, label: '轮询间隔(ms)' }, maxMs: { type: 'number', min: 1, default: 30000, label: '最长等待(ms)' } },
           defaults: { expression: '', intervalMs: 200, maxMs: 30000 } },
@@ -415,7 +420,22 @@
             var required = !!schema.required;
             var reqStar = required ? ' *' : '';
             var control;
-            if (schema.enum && Array.isArray(schema.enum)) {
+            // 场景选择器：从 state.meta.sceneList 渲染下拉
+            if (schema.format === 'select-scene') {
+              var list = (state.meta && Array.isArray(state.meta.sceneList)) ? state.meta.sceneList : [];
+              control = h('select', {
+                class: 'nr-ss-sf-select',
+                value: value != null ? value : (schema.default != null ? schema.default : ''),
+                onChange: function (e) { onConfigChange(idx, key, e.target.value); }
+              }, [h('option', { value: '' }, '— 选择场景 —')].concat(list.map(function (s) {
+                return h('option', {
+                  key: 'sc_' + s.sceneId,
+                  value: s.sceneId,
+                  selected: s.sceneId === value,
+                  attrs: s.isSelf ? { 'data-self': '1' } : {}
+                }, (s.name || '未命名') + ' [' + (s.sceneId || '无ID') + ']' + (s.isSelf ? ' (本场景·禁自引用)' : ''));
+              })));
+            } else if (schema.enum && Array.isArray(schema.enum)) {
               control = h('select', {
                 class: 'nr-ss-sf-select',
                 value: value != null ? value : (schema.default != null ? schema.default : ''),
@@ -721,6 +741,7 @@
       color: '#8db4dd',
       defaults: {
         name: { value: '' },
+        sceneId: { value: '', required: false },
         failBehavior: { value: 'stop', required: true },
         maxLoopLimit: { value: 1000, required: true, validate: RED.validators.number() },
         defaultStepTimeoutMs: { value: 15000, required: true, validate: RED.validators.number() },
@@ -736,8 +757,42 @@
       oneditprepare: function () {
         var node = this;
         var $steps = $('#node-input-steps');
+        var $sceneId = $('#node-input-sceneId');
         var currentSteps = ensureJSON(node.steps || []);
         try { $steps.val(JSON.stringify(currentSteps)); } catch (e) { $steps.val('[]'); }
+
+        // sceneId 为空时自动生成；提交时持久化到 node.sceneId
+        if (!node.sceneId) {
+          node.sceneId = 'scene_' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+        }
+        $sceneId.val(node.sceneId);
+        // 🎲 生成按钮：强制重新生成
+        $('#nr-ss-gen-sceneId').off('click').on('click', function () {
+          var nid = 'scene_' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+          $sceneId.val(nid);
+          node.sceneId = nid;
+        });
+        // 手动改 sceneId 时同步到 node
+        $sceneId.off('change').on('change', function () { node.sceneId = $sceneId.val() || ''; });
+
+        // 收集所有已部署的 scene-steps 节点（除自己外）的 sceneId+name，
+        // 用于 call_scene(ref_scene 模式) 下拉选择
+        var sceneList = [];
+        try {
+          if (RED && RED.nodes && typeof RED.nodes.eachNode === 'function') {
+            RED.nodes.eachNode(function (n) {
+              if (n && n.type === 'scene-steps' && n.id !== node.id) {
+                sceneList.push({
+                  sceneId: n.sceneId || '',
+                  name: n.name || n.id,
+                  nodeId: n.id
+                });
+              }
+            });
+          }
+        } catch (e) { /* ignore */ }
+        // 自身也加入（编辑期预览用，但运行时调用自身会被循环检测拦截）
+        sceneList.unshift({ sceneId: node.sceneId, name: (node.name || '本场景'), nodeId: node.id, isSelf: true });
 
         function persist(nextSteps) {
           currentSteps = ensureJSON(nextSteps);
@@ -749,6 +804,8 @@
         // 先尝试元数据加载（离线下也能拿到 DEFAULT_META 兜底）
         fetchMeta(function (_err, meta) {
           var metaObj = meta || JSON.parse(JSON.stringify(DEFAULT_META));
+          // 把场景列表注入到 metaObj，供 call_scene ref_scene 模式下拉使用
+          metaObj.sceneList = sceneList;
           // 尝试 Vue CDN；5s 后失败就兜底
           var timeoutId = setTimeout(function () {
             if (!window.Vue) mountFallbackEditor(mountEl, currentSteps, persist);

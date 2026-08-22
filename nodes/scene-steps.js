@@ -74,8 +74,11 @@ module.exports = function (RED) {
   function SceneStepsNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
+    // 把 RED 引用挂到 node，供 call_scene(ref_scene 模式) 通过 RED.nodes.eachNode 查目标场景
+    node._red = RED;
 
     node.name = config.name || '';
+    node.sceneId = config.sceneId || '';
     node.failBehavior = config.failBehavior || DEFAULT_FAIL;
     node.maxLoopLimit = Number(config.maxLoopLimit) || MAX_LOOP_DEFAULT;
     node.defaultStepTimeoutMs = Number(config.defaultStepTimeoutMs) || DEFAULT_TIMEOUT;
@@ -149,6 +152,7 @@ module.exports = function (RED) {
           maxLoopLimit: node.maxLoopLimit,
           defaultStepTimeoutMs: node.defaultStepTimeoutMs,
           redNode: node,
+          selfSceneId: node.sceneId,   // 用于 call_scene(ref_scene) 循环检测
           signal,
           inputMsg: msg,
           emit: (ev) => {

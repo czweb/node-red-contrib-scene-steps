@@ -19,28 +19,54 @@ const action = {
     type: 'object',
     required: ['mode'],
     properties: {
-      mode:          { type: 'string',  title: '模式', enum: ['inline_steps', 'steps_from_var'], default: 'inline_steps' },
+      mode:          { type: 'string',  title: '模式', enum: ['ref_scene', 'inline_steps', 'steps_from_var'], default: 'ref_scene' },
+      refSceneId:    { type: 'string',  title: '引用场景(mode=ref_scene)', default: '', format: 'select-scene' },
       inline_steps:  { type: 'array',   title: '内嵌步骤数组', default: [], items: { type: 'object' } },
       stepsVar:      { type: 'string',  title: '变量名(mode=steps_from_var 时)', default: '' },
       inheritVars:   { type: 'boolean', title: '继承父场景变量', default: true },
       injectVars:    { type: 'object',  title: '注入额外变量(JSON)', default: {} }
     }
   },
-  defaults: { mode: 'inline_steps', inline_steps: [], stepsVar: '', inheritVars: true, injectVars: {} },
+  defaults: { mode: 'ref_scene', refSceneId: '', inline_steps: [], stepsVar: '', inheritVars: true, injectVars: {} },
   validate(cfg) {
-    if (cfg.mode === 'inline_steps') {
+    if (cfg.mode === 'ref_scene') {
+      if (!cfg.refSceneId) throw new Error('refSceneId 不能为空（请在编辑器下拉选择目标场景）');
+    } else if (cfg.mode === 'inline_steps') {
       if (!Array.isArray(cfg.inline_steps)) throw new Error('inline_steps 必须是数组');
     } else if (cfg.mode === 'steps_from_var') {
       if (!cfg.stepsVar) throw new Error('stepsVar 不能为空');
     } else {
-      throw new Error('mode 必须为 inline_steps 或 steps_from_var');
+      throw new Error('mode 必须是 ref_scene / inline_steps / steps_from_var');
     }
     return true;
   },
   async execute(ctx) {
     let subSteps;
-    if (ctx.config.mode === 'inline_steps') subSteps = ctx.config.inline_steps;
-    else {
+    let childSceneId = '';   // 仅 ref_scene 模式有值，用于循环检测
+    if (ctx.config.mode === 'ref_scene') {
+      const refId = String(ctx.config.refSceneId || '');
+      if (!refId) throw SceneError.fromCode('CONFIG_INVALID', 'ref_scene 模式: refSceneId 为空');
+      // 从 RED.nodes 枚举所有 scene-steps 节点，找匹配 sceneId 的那个
+      const RED = ctx.node && ctx.node._red ? ctx.node._red : null;
+      // 兼容：scene-steps.js 把 RED 挂到 node 上（_red）；否则尝试 ctx.red
+      const redApi = RED || ctx.red || (typeof global !== 'undefined' && global.__sceneStepsRED) || null;
+      if (!redApi || typeof redApi.nodes.eachNode !== 'function') {
+        throw SceneError.fromCode('CONFIG_INVALID', 'ref_scene 模式: 无法访问 RED.nodes（运行时未注入）');
+      }
+      let target = null;
+      redApi.nodes.eachNode(function (n) {
+        if (target) return;
+        if (n && n.type === 'scene-steps' && n.sceneId === refId) target = n;
+      });
+      if (!target) throw SceneError.fromCode('CONFIG_INVALID', `找不到 sceneId="${refId}" 的 scene-steps 节点`);
+      // target.steps 可能是字符串或数组（normalizeSteps 在节点构造时已处理）
+      subSteps = Array.isArray(target.steps) ? target.steps : [];
+      // 深拷贝避免引用污染
+      try { subSteps = JSON.parse(JSON.stringify(subSteps)); } catch (e) { /* 用原引用 */ }
+      childSceneId = refId;
+    } else if (ctx.config.mode === 'inline_steps') {
+      subSteps = ctx.config.inline_steps;
+    } else {
       const v = ctx.vars[String(ctx.config.stepsVar)];
       if (!Array.isArray(v)) throw SceneError.fromCode('CONFIG_INVALID', `变量 ${ctx.config.stepsVar} 不是步骤数组`);
       subSteps = v;
@@ -55,10 +81,12 @@ const action = {
     }
 
     // 注：递归/深度的防护已经在 executor.runSteps 入口做：
-    //   1) runSteps 入口把 steps 的 fingerprint 入 ancestors 链，与历史重复即抛 NESTED_RECURSION
-    //   2) 链长度 > maxDepth 抛 NEST_TOO_DEEP
-    // 这里不再重复入链，避免指纹在链上 double。
-    const result = await ctx.runNested(subSteps /* 不传 extraAncestor，executor 自己负责 fingerprint 查重 */);
+    //   1) fingerprint 祖先链：inline_steps 内容重复检测
+    //   2) sceneAncestors 链：ref_scene 间接循环检测 A→B→C→A
+    //   3) 链长度 > maxDepth 抛 NEST_TOO_DEEP
+    // ref_scene 模式把被调用场景的 sceneId 透传给 runNested，让子 runSteps 入口查重
+    const extraAncestor = `scene:${childSceneId}`;
+    const result = await ctx.runNested(subSteps, extraAncestor, childSceneId);
     if (result && result.error) throw result.error;
     return {
       output: {
