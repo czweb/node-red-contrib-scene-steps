@@ -276,10 +276,11 @@
           var topH = 220;
           try {
             var g = $('.nr-ss-top-grid').first();
-            var adv = $('.nr-ss-top-adv:visible').first();
-            var gh = g.length ? (g.outerHeight(true) || 0) : 0;
+            var adv = $('#nr-ss-top-adv-body:visible').first();
+            var row = $('.nr-ss-top-row').first();
+            var rh = row.length ? (row.outerHeight(true) || 0) : 0;
             var ah = adv.length ? (adv.outerHeight(true) || 0) : 0;
-            if (gh + ah > 0) topH = gh + ah + 60;
+            if (rh + ah > 0) topH = rh + ah + 60;
           } catch (e2) {}
           root.style.height = Math.max(360, height - topH) + 'px';
         }
@@ -951,10 +952,11 @@
           var topH = 220;
           try {
             var g = $('.nr-ss-top-grid').first();
-            var adv = $('.nr-ss-top-adv:visible').first();
-            var gh = g.length ? (g.outerHeight(true) || 0) : 0;
+            var adv = $('#nr-ss-top-adv-body:visible').first();
+            var row = $('.nr-ss-top-row').first();
+            var rh = row.length ? (row.outerHeight(true) || 0) : 0;
             var ah = adv.length ? (adv.outerHeight(true) || 0) : 0;
-            if (gh + ah > 0) topH = gh + ah + 60;
+            if (rh + ah > 0) topH = rh + ah + 60;
           } catch (e) { topH = 220; }
           box.style.height = Math.max(360, size.height - topH) + 'px';
         }
