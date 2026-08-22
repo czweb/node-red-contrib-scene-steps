@@ -25,7 +25,7 @@ const { createSignal } = require('./lib/cancel');
 const { SceneError, ERROR_CODES } = require('./lib/errors');
 
 const MAX_LOOP_DEFAULT = 1000;
-const DEFAULT_FAIL = 'stop';
+const DEFAULT_FAIL = 'skip';
 const DEFAULT_TIMEOUT = 15000;
 
 function cloneSafe(v) {
